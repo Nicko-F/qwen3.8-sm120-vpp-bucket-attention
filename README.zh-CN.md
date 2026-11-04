@@ -7,7 +7,8 @@
 
 基于 **vLLM 与 FlashInfer** 的 Qwen3.8 推理优化，包含三个层级：
 
-- **Prefill：**四卡折返式 VPP，配合 CUDA 分段 DMA 或 NCCL 边界传输。
+- **Prefill：**四卡折返式 VPP，配合 CUDA 分段 DMA 或 NCCL 边界传输；DMA 路径
+  每个 Rank 共享 2 个输出 Slot 与 3 个输入 Slot，见[资源模型](docs/vpp-resources.md)。
 - **Decode：**按 KV 工作量分桶，跨兼容层复用计划，保留原生回退。
 - **算子：**Residual/RMSNorm→NVFP4、QK Norm/RoPE/KV 写入、Attention 输出与 FP8 量化融合。
 

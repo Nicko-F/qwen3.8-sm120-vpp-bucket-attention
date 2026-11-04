@@ -27,6 +27,9 @@ and READY/ACK publication. Reuse this mechanism and its completion discipline.
   arena with three physical slots. Retain separate per-edge sequence, batch,
   generation and control metadata. Logical wire slots need not equal physical
   device slots; never use a physical slot number as another edge's wire identity.
+  Allocate both arenas once at transport initialization. The hot path borrows
+  fixed-address views; it does not grow, resize or cudaMalloc/free communication
+  buffers per chunk. Dynamic ownership is distinct from dynamic allocation.
 - Logical endpoint pools may remain lightweight views over those arenas. They
   must not each allocate payload storage. A physical lease is returned only
   after its own D2H completion (source) or final consumer event (destination).
@@ -131,3 +134,81 @@ Neither fix changed the library, model or stage order.
 
 Evidence run: `public_vpp-resources_20261104T172246_927812Z`. Raw machine logs
 stay in the private run archive; this document records the portable summary.
+
+## Matched model checks
+
+Four configuration points completed, each with one warm bank and three timed
+banks. These are focused resource checks, not a rerun of the historical full
+benchmark. Both layouts used the same ordered four NUMA-local RTX 5090s, the
+same model/runtime and default native tactics, a fixed 6 GiB KV allocation per
+rank, eight maximum sequences and disabled prefix caching. Actual KV allocation
+was identical: 502 blocks with block size 2784. Each bank contained four P+1
+requests and 16 input chunks in total.
+
+| Capacity | Prompt tokens/request | Layout | Median bank (s) | Timed range (s) |
+| --- | --- | --- | --- | --- |
+| 2048 | 8192 | Edge-owned | 1.450957 | 1.447842–1.458284 |
+| 2048 | 8192 | Rank-shared | 0.883493 | 0.881769–1.442930 |
+| 8192 | 32768 | Edge-owned | 7.028552 | 7.018437–7.032519 |
+| 8192 | 32768 | Rank-shared | 4.564127 | 4.557483–7.006229 |
+
+The observed median reductions are 39.1% and 35.1%. Both shared-layout samples
+include a much slower bank near the control's latency; those samples remain in
+the [CSV](../benchmarks/vpp_resources.csv). The cause of this variability was not
+isolated. These measurements show no end-to-end loss in the two checked cases;
+they do not establish a stable speedup across loads or context lengths. Any gain
+belongs to the combined resource/stream/prefetch change, not buffer reduction
+alone. Model loading, compilation and the warm bank are outside bank timing.
+
+| Capacity | Middle-rank edge payload | Middle-rank shared payload | Saved/rank | Middle-rank peak allocated: edge / shared |
+| --- | --- | --- | --- | --- |
+| 2048 | 1120 MiB | 200 MiB | 0.898438 GiB | 15.869829 / 14.971391 GiB |
+| 8192 | 4480 MiB | 800 MiB | 3.593750 GiB | 22.167905 / 18.574155 GiB |
+
+The allocated-peak columns use `torch.cuda.max_memory_allocated` over the worker
+lifecycle, including model loading/profile/warmup. They are not just buffer
+capacity or allocator-reserved memory. The per-rank allocation differences
+exactly match the payload-budget differences with KV held fixed. At C8192,
+outer ranks save 1.40625 GiB each; all four ranks together save 10 GiB of fixed
+communication payload. Middle-rank payload falls by 82.1%. Normal deployments
+may use the released headroom to enlarge native KV, so total VRAM need not fall
+by the same amount when its allocation remains automatic.
+
+All six source edges reported 68 direct publications and zero staged
+publications in every configuration. The endpoint sequences and per-rank
+receive counts also matched. No output-staging copy was added to obtain the
+memory reduction. Every run completed its banks, closed the transport with zero
+live ownership, exited 0 and released its owned process session.
+
+Native vLLM teardown still emitted forced-EngineCore-termination warnings; the
+C2048 shared run additionally reported a forced worker termination and a shared
+memory cleanup warning. These logs are retained. Transport ownership drained
+successfully, but fully graceful native-engine shutdown is not claimed.
+
+### Occupancy and backpressure
+
+The shared model path reached source occupancy two and receive occupancy three.
+Both C2048 layouts and the C8192 edge-owned control had zero blocking slot-credit
+waits. C8192 rank-shared had the following cumulative waits:
+
+| Rank | Source waits | Source wait (ms) | Receive waits | Receive wait (ms) |
+| --- | --- | --- | --- | --- |
+| 0 | 17 | 1351.320 | 0 | 0 |
+| 1 | 27 | 1216.830 | 3 | 62.374 |
+| 2 | 29 | 2221.144 | 0 | 0 |
+| 3 | 0 | 0 | 0 | 0 |
+
+These counters include native warmup, the warm bank and all three timed banks.
+They measure host credit waiting; source credit also remains owned while its
+producer is computing. Waits on different ranks can overlap compute and one
+another. Their sum is not additional bank latency or isolated D2H time.
+
+The C8192 edge-owned model actually reached source occupancy five on rank 0
+and receive occupancy three on several edges. Earlier observations of one or
+two slots were therefore not a universal bound. The two-source-slot design
+limits host enqueueing with backpressure; the current bank results support
+keeping it, without claiming that two slots can never limit another workload.
+
+Reproduce these points with `benchmarks/vpp_resources.py`; run IDs and all
+individual timing samples are in the CSV. The bounded checks are complete;
+no full curves or additional tuning sweep were run.

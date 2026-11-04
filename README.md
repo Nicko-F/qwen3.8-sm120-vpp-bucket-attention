@@ -11,7 +11,8 @@ Inference optimizations for Qwen3.8 on NVIDIA SM120 GPUs, built on **vLLM and
 FlashInfer**:
 
 - **Prefill:** folded virtual pipeline parallelism (VPP), with segmented CUDA
-  DMA or NCCL boundary transport.
+  DMA or NCCL boundary transport. The DMA path shares two output and three input
+  slots per rank; see the [resource model](docs/vpp-resources.md).
 - **Decode:** KV-length-aware bucket attention, shared planning across compatible
   layers, and native fallback for unsuitable workloads.
 - **Kernels:** optional residual/RMSNorm → NVFP4 packing, QK norm/RoPE/KV append,

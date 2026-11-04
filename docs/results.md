@@ -1,5 +1,9 @@
 # Results
 
+The subsequent [VPP resource refactor](vpp-resources.md#matched-model-checks)
+has its own two-capacity comparison and allocation/credit records. It retains
+the stage order and is separate from the historical performance tables below.
+
 These tables summarize completed research runs before extraction into this
 package. Packaging smoke results are recorded separately in
 [installation](installation.md). They do not replace performance measurements.
