@@ -25,6 +25,12 @@ while (($#)); do
     *) printf 'Unknown bootstrap option: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
+export MAX_JOBS="${MAX_JOBS:-2}"
+export TMPDIR="${TMPDIR:-$repo/.cache/tmp}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$repo/.cache/pip}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$repo/.cache/xdg}"
+mkdir -p -- "$TMPDIR" "$PIP_CACHE_DIR" "$XDG_CACHE_HOME"
 if [[ ! -x "$venv/bin/python" ]]; then
   "$python" -m venv "$venv"
 fi
@@ -59,7 +65,5 @@ if ((runtime && prefetch)); then
     printf '%s\n' 'FlashInfer SM120f JIT-cache prefetch failed; native source JIT remains available at startup.' >&2
   fi
 fi
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
-export MAX_JOBS="${MAX_JOBS:-2}"
 if (($# == 0)); then set -- doctor; fi
 exec "$venv/bin/qwen-infra" "$@"

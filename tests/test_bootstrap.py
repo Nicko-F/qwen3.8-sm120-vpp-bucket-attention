@@ -12,8 +12,11 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="deployment bootstrap targets Linux")
 
 
-@pytest.mark.parametrize("prefetch,fail", [(True, False), (False, False), (True, True)])
-def test_bootstrap_prefetch_is_gpu_hidden_optional_and_failure_falls_back(tmp_path, prefetch, fail):
+@pytest.mark.parametrize(
+    "prefetch,fail,override",
+    [(True, False, False), (False, False, False), (True, True, False), (False, False, True)],
+)
+def test_bootstrap_prefetch_is_gpu_hidden_optional_and_failure_falls_back(tmp_path, prefetch, fail, override):
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is required for the deployment bootstrap")
@@ -24,7 +27,9 @@ def test_bootstrap_prefetch_is_gpu_hidden_optional_and_failure_falls_back(tmp_pa
     body = (
         "#!" + sys.executable + "\nimport json,os,sys\n"
         'with open(os.environ["BOOTSTRAP_TEST_LOG"],"a") as stream:\n'
-        ' stream.write(json.dumps({"args":sys.argv[1:],"cuda":os.environ.get("CUDA_VISIBLE_DEVICES")})+"\\n")\n'
+        ' stream.write(json.dumps({"args":sys.argv[1:],"cuda":os.environ.get("CUDA_VISIBLE_DEVICES"),'
+        '"resources":{key:os.environ.get(key) for key in '
+        '("TMPDIR","PIP_CACHE_DIR","XDG_CACHE_HOME","OMP_NUM_THREADS","MAX_JOBS")}})+"\\n")\n'
         'sys.exit(1 if "flashinfer" in sys.argv and os.environ.get("BOOTSTRAP_TEST_FAIL")=="1" else 0)\n'
     )
     for name in ("python", "qwen-infra"):
@@ -42,6 +47,24 @@ def test_bootstrap_prefetch_is_gpu_hidden_optional_and_failure_falls_back(tmp_pa
         BOOTSTRAP_TEST_FAIL="1" if fail else "0",
         CUDA_VISIBLE_DEVICES="user-selection",
     )
+    for name in ("TMPDIR", "PIP_CACHE_DIR", "XDG_CACHE_HOME", "OMP_NUM_THREADS", "MAX_JOBS"):
+        env.pop(name, None)
+    expected = dict(
+        TMPDIR=str(script.parent.parent / ".cache/tmp"),
+        PIP_CACHE_DIR=str(script.parent.parent / ".cache/pip"),
+        XDG_CACHE_HOME=str(script.parent.parent / ".cache/xdg"),
+        OMP_NUM_THREADS="2",
+        MAX_JOBS="2",
+    )
+    if override:
+        expected.update(
+            TMPDIR=str(tmp_path / "custom-tmp"),
+            PIP_CACHE_DIR=str(tmp_path / "custom-pip"),
+            XDG_CACHE_HOME=str(tmp_path / "custom-xdg"),
+            OMP_NUM_THREADS="3",
+            MAX_JOBS="1",
+        )
+        env.update(expected)
     result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -59,5 +82,7 @@ def test_bootstrap_prefetch_is_gpu_hidden_optional_and_failure_falls_back(tmp_pa
             "sm120f",
         ]
         assert all(row["cuda"] == "" for row in native)
-    assert calls[-1] == {"args": ["serve", "--model", "example/model"], "cuda": "user-selection"}
+    assert calls[-1]["args"] == ["serve", "--model", "example/model"]
+    assert calls[-1]["cuda"] == "user-selection"
+    assert all(row["resources"] == expected for row in calls)
     assert ("prefetch failed" in result.stderr) == fail
