@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import hashlib
+import sys
 
 
 def package_directory(name):
@@ -19,11 +20,17 @@ def package_directory(name):
     return Path(spec.origin).parent if spec.origin else None
 
 
-def compiler_inputs():
+def compiler_inputs(*, prefix=None):
     configured = os.environ.get("QWEN_INFRA_CUDA_HOME") or os.environ.get("CUDA_HOME")
     compiler = shutil.which("nvcc")
+    private = Path(prefix or sys.prefix) / "cuda-toolkit/nvidia/cu13"
+    packaged = package_directory("nvidia.cu13")
     if configured:
         cuda = Path(configured).expanduser().resolve()
+    elif (private / "bin/nvcc").is_file():
+        cuda = private.resolve()
+    elif packaged is not None and (packaged / "bin/nvcc").is_file():
+        cuda = packaged.resolve()
     elif compiler:
         cuda = Path(compiler).resolve().parent.parent
     else:

@@ -31,3 +31,19 @@ def test_nccl_home_supports_external_lib64_without_global_install(tmp_path):
         {"NCCL_HOME": str(tmp_path)},
     )
     assert output.splitlines() == [str(tmp_path / "include"), str(tmp_path / "lib64/libnccl.so.2")]
+
+
+def test_private_toolkit_is_rediscovered_after_bootstrap_environment_ends(tmp_path):
+    cuda = tmp_path / "cuda-toolkit/nvidia/cu13"
+    (cuda / "bin").mkdir(parents=True)
+    (cuda / "include/nv").mkdir(parents=True)
+    (cuda / "bin/nvcc").touch()
+    (cuda / "include/nv/target").touch()
+    program = (
+        'import os\nos.environ.pop("CUDA_HOME",None)\nos.environ.pop("QWEN_INFRA_CUDA_HOME",None)\n'
+        "from qwen_infra.runtime_paths import compiler_inputs\nprint(*compiler_inputs(prefix="
+        + repr(str(tmp_path))
+        + '),sep="\\n")'
+    )
+    output = _run(program, {"QWEN_INFRA_CCCL_INCLUDE": str(cuda / "include")})
+    assert output.splitlines() == [str(cuda.resolve()), str((cuda / "include").resolve())]
