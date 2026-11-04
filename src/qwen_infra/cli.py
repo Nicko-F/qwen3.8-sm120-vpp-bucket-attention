@@ -31,6 +31,28 @@ def serve_command(args, passthrough):
     return argv + passthrough
 
 
+def display_command(command):
+    """Redact credentials in the launch preview without changing execution."""
+    visible = []
+    secret_flag = None
+    for token in command:
+        if token.startswith("--"):
+            secret_flag = None
+            flag, separator, _ = token.partition("=")
+            if flag in ("--api-key", "--hf-token"):
+                visible.append(flag + "=[REDACTED]" if separator else flag)
+                if not separator or flag == "--api-key":
+                    secret_flag = flag
+                continue
+        elif secret_flag is not None:
+            visible.append("[REDACTED]")
+            if secret_flag == "--hf-token":
+                secret_flag = None
+            continue
+        visible.append(token)
+    return shlex.join(visible)
+
+
 def doctor(check_cuda=False):
     result = dict(python=sys.version.split()[0], platform=sys.platform, packages={})
     for distribution in ("qwen-infra", "vllm", "torch", "flashinfer-python", "nvidia-cutlass-dsl"):
@@ -189,7 +211,7 @@ def main(argv=None):
     if args.command == "prefill":
         return _prefill(args)
     command = serve_command(args, extra[1:] if extra[:1] == ["--"] else extra)
-    print(shlex.join(command), flush=True)
+    print(display_command(command), flush=True)
     if args.dry_run:
         return 0
     os.environ.setdefault("OMP_NUM_THREADS", "2")

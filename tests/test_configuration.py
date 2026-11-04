@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from qwen_infra.cli import serve_command
+from qwen_infra.cli import main, serve_command
 from qwen_infra.config import PrefillConfig, decode_contract, decode_options, host_reserve_bytes
 from qwen_infra.kernels.service_fusions import plain_copy
 from qwen_infra.owners import OWNER_ABI, stable_owner_key
@@ -21,6 +21,23 @@ def test_native_command_preserves_user_tokens_and_has_no_extension_options():
     tail = ["--host", "127.0.0.1", "--api-key", "spaces and $literal"]
     command = serve_command(args, tail)
     assert command == [sys.executable, "-m", "vllm.entrypoints.cli.main", "serve", args.model, *tail]
+
+
+def test_launch_preview_redacts_separate_and_attached_credentials_only(capsys):
+    args = Namespace(profile="native", tensor_parallel_size=None, model="example/model")
+    for flag in ("--api-key", "--hf-token"):
+        for attached in (False, True):
+            secret = "dummy-secret with $literal"
+            tail = [flag + "=" + secret] if attached else [flag, secret]
+            if flag == "--api-key":
+                tail.append("second-dummy-secret")
+            tail.extend(["--port", "8000"])
+            original = serve_command(args, tail)
+            assert main(["serve", "--model", args.model, "--dry-run", *tail]) == 0
+            preview = capsys.readouterr().out
+            assert secret not in preview and "second-dummy-secret" not in preview
+            assert "[REDACTED]" in preview and "--port 8000" in preview
+            assert serve_command(args, tail) == original
 
 
 def test_compile_identity_is_stamped_before_model_construction():
