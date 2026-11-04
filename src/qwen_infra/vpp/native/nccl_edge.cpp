@@ -79,7 +79,7 @@ void NcclEdge::submit(const SlotTicket& t) {
               "NCCL edge submissions must match reservation sequence and slot state");
   const auto& d = pool_->metadata_.descriptor(t);
   const c10::cuda::CUDAGuard guard(pool_->device_);
-  const auto stream = pool_->transfer_stream_;
+  const auto stream = pool_->transfer_stream();
   auto& e = pool_->events_[t.slot_id];
   try {
     check_async();
@@ -87,7 +87,7 @@ void NcclEdge::submit(const SlotTicket& t) {
     if (send) e.ready.block(stream);
     // Use capacity-based plane addresses even for zero-count messages. P2P
     // retains zero tasks in NCCL, preserving peer FIFO and our sequence.
-    auto* base = static_cast<char*>(pool_->storage_.data_ptr()) + t.slot_id * pool_->layout_.slot_bytes();
+    auto* base = static_cast<char*>(pool_->storage_.data_ptr()) + pool_->physical_slot(t) * pool_->layout_.slot_bytes();
     const std::size_t count = d.hidden.valid_bytes / sizeof(at::BFloat16);
     check_nccl(ncclGroupStart(), "ncclGroupStart");
     ncclResult_t operation = ncclSuccess;
@@ -115,7 +115,7 @@ std::uint32_t NcclEdge::progress() {
 void NcclEdge::mark(c10::cuda::CUDAEvent& event) {
   pool_->current_stream();
   TORCH_CHECK(comm_, "NCCL endpoint is closed");
-  event.record(pool_->transfer_stream_);
+  event.record(pool_->transfer_stream());
 }
 
 void NcclEdge::close() {

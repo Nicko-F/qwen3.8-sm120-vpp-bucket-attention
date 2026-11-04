@@ -33,11 +33,10 @@ Publication& publication(const at::Tensor& token) {
 }
 }  // namespace
 
-DeviceSlotPool::DeviceSlotPool(SlotRole role, BoundaryLayout layout,
-    std::uint64_t epoch, std::uint32_t src_stage, c10::DeviceIndex device)
-    : role_(role), layout_(layout), metadata_(role, layout, epoch, src_stage),
-      device_(device), owner_(std::this_thread::get_id()),
-      transfer_stream_(c10::cuda::getStreamFromPool(false, device)) {
+DeviceBufferArena::DeviceBufferArena(SlotRole role, BoundaryLayout layout, c10::DeviceIndex device)
+    : role_(role), layout_(layout), device_(device), owner_(std::this_thread::get_id()),
+      leases_(layout.slot_count) {
+  layout_.validate();
   const c10::cuda::CUDAGuard guard(device_);
   outside_capture(c10::cuda::getCurrentCUDAStream(device_));
   storage_ = at::empty({layout.slot_count, 2, layout.token_capacity, kHiddenSize},
@@ -45,12 +44,36 @@ DeviceSlotPool::DeviceSlotPool(SlotRole role, BoundaryLayout layout,
   // Caching-allocator storage may have pending work on its allocation stream.
   // recordStream protects destruction but does NOT establish this dependency.
   allocation_ready_.record(c10::cuda::getCurrentCUDAStream(device_));
+}
+void DeviceBufferArena::close() {
+  TORCH_CHECK(owner_ == std::this_thread::get_id() && live() == 0,
+              "drain physical leases on the arena owner before close");
+  storage_ = at::Tensor();
+}
+
+DeviceSlotPool::DeviceSlotPool(SlotRole role, BoundaryLayout layout,
+    std::uint64_t epoch, std::uint32_t src_stage, c10::DeviceIndex device,
+    std::shared_ptr<DeviceBufferArena> arena)
+    : role_(role), layout_(layout), metadata_(role, layout, epoch, src_stage),
+      device_(device), owner_(std::this_thread::get_id()),
+      owns_arena_(!arena),
+      arena_(arena ? std::move(arena) : std::make_shared<DeviceBufferArena>(role, layout, device)) {
+  TORCH_CHECK(arena_->role_ == role && arena_->device_ == device &&
+      arena_->layout_.token_capacity == layout.token_capacity &&
+      arena_->owner_ == owner_ && arena_->storage_.defined(), "incompatible physical arena");
+  storage_ = arena_->storage_;
+  const c10::cuda::CUDAGuard guard(device_);
   for (std::uint32_t i = 0; i < layout.slot_count; ++i) {
     events_[i].ready.create(device_);
     events_[i].transfer_done.create(device_);
     events_[i].consumer_done.create(device_);
     for(auto& event:events_[i].plane_ready) event.create(device_);
   }
+}
+c10::cuda::CUDAStream DeviceSlotPool::transfer_stream() {
+  check_owner();
+  if (!transfer_stream_) transfer_stream_ = c10::cuda::getStreamFromPool(false, device_);
+  return *transfer_stream_;
 }
 
 void DeviceSlotPool::check_owner() const {
@@ -66,7 +89,7 @@ c10::cuda::CUDAStream DeviceSlotPool::current_stream() const {
 void DeviceSlotPool::keep_storage(const at::Tensor& tensor,
                                  const c10::cuda::CUDAStream& stream) {
   if (tensor.storage().data_ptr().get() == storage_.storage().data_ptr().get())
-    allocation_ready_.block(stream);
+    arena_->allocation_ready_.block(stream);
   // Reuse PyTorch allocator's asynchronous destruction contract, including
   // input temporaries. No extra tensor clone or retention until remote receipt.
   c10::cuda::CUDACachingAllocator::recordStream(tensor.storage().data_ptr(), stream);
@@ -81,17 +104,27 @@ void DeviceSlotPool::require_tensor(const at::Tensor& value, const BoundaryDesc&
 }
 std::pair<at::Tensor, at::Tensor> DeviceSlotPool::views(const SlotTicket& t) const {
   const auto& d = metadata_.descriptor(t);
-  auto slot = storage_.select(0, t.slot_id);
+  auto slot = storage_.select(0, physical_slot(t));
   return {slot.select(0, 0).narrow(0, 0, d.valid_tokens),
           slot.select(0, 1).narrow(0, 0, d.valid_tokens)};
+}
+std::uint32_t DeviceSlotPool::physical_slot(const SlotTicket& t) const {
+  metadata_.descriptor(t);  // Reject stale/wrong-pool tickets before indexing.
+  return events_[t.slot_id].physical;
 }
 std::optional<SlotTicket> DeviceSlotPool::reserve(const WireBoundary& wire) {
   check_owner();
   TORCH_CHECK(!backend_claimed_ || transport_attached_, "NCCL endpoint already closed");
-  const auto ticket = metadata_.try_acquire(decode_boundary(layout_, wire));
+  const auto desc = decode_boundary(layout_, wire);
+  if (!arena_->leases_.available()) {
+    arena_->leases_.stalled();
+    return std::nullopt;
+  }
+  const auto ticket = metadata_.try_acquire(desc);
   if (ticket) {
     auto& e = events_[ticket->slot_id];
     e.ticket = ticket;
+    e.physical = arena_->leases_.acquire(*ticket);
     e.consumer_recorded = false;
     e.discard = false;
     e.consumer_stream.reset();
@@ -206,7 +239,8 @@ void DeviceSlotPool::loopback(const SlotTicket& t, DeviceSlotPool& dst, const Sl
   dst.check_owner();
   TORCH_CHECK(!backend_claimed_ && !dst.backend_claimed_, "cannot mix loopback and NCCL endpoints");
   const c10::cuda::CUDAGuard guard(device_);
-  outside_capture(transfer_stream_);
+  const auto stream = transfer_stream();
+  outside_capture(stream);
   TORCH_CHECK(role_ == SlotRole::Source && dst.role_ == SlotRole::Destination &&
               device_ == dst.device_ && layout_.slot_count == dst.layout_.slot_count &&
               layout_.token_capacity == dst.layout_.token_capacity,
@@ -219,17 +253,17 @@ void DeviceSlotPool::loopback(const SlotTicket& t, DeviceSlotPool& dst, const Sl
               "loopback endpoints disagree on the wire boundary");
   const auto in = views(t), out = dst.views(dt);
   try {
-    keep_storage(storage_, transfer_stream_);
-    dst.keep_storage(dst.storage_, transfer_stream_);
-    events_[t.slot_id].ready.block(transfer_stream_);
+    keep_storage(storage_, stream);
+    dst.keep_storage(dst.storage_, stream);
+    events_[t.slot_id].ready.block(stream);
     if (d.hidden.valid_bytes) {
       C10_CUDA_CHECK(cudaMemcpyAsync(out.first.data_ptr(), in.first.const_data_ptr(),
-          d.hidden.valid_bytes, cudaMemcpyDeviceToDevice, transfer_stream_.stream()));
+          d.hidden.valid_bytes, cudaMemcpyDeviceToDevice, stream.stream()));
       C10_CUDA_CHECK(cudaMemcpyAsync(out.second.data_ptr(), in.second.const_data_ptr(),
-          d.residual.valid_bytes, cudaMemcpyDeviceToDevice, transfer_stream_.stream()));
+          d.residual.valid_bytes, cudaMemcpyDeviceToDevice, stream.stream()));
     }
-    events_[t.slot_id].transfer_done.record(transfer_stream_);
-    dst.events_[dt.slot_id].transfer_done.record(transfer_stream_);
+    events_[t.slot_id].transfer_done.record(stream);
+    dst.events_[dt.slot_id].transfer_done.record(stream);
     metadata_.transfer_recorded(t);
     dst.metadata_.transfer_recorded(dt);
   } catch (...) { poison(); dst.poison(); throw; }
@@ -284,6 +318,7 @@ std::uint32_t DeviceSlotPool::progress() {
                  e.discard && e.transfer_done.query()) {
         metadata_.discard_received(t);
       } else { continue; }
+      arena_->leases_.release(e.physical, t);
       e.ticket.reset();
       e.consumer_stream.reset();
       e.producer_stream.reset();
@@ -298,6 +333,7 @@ void DeviceSlotPool::close() {
   TORCH_CHECK(metadata_.live() == 0, "drain all resource-specific completion events before close");
   metadata_.stop_admission();
   storage_ = at::Tensor();
+  if (owns_arena_) arena_->close();
   closed_ = true;
 }
 }  // namespace vpp

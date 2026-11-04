@@ -13,6 +13,24 @@ struct SlotTicket {
   std::uint32_t slot_id;
 };
 
+// Physical storage credits are independent of each edge's wire ring. The exact
+// ticket owns a lease until its resource-specific completion has been observed.
+class PhysicalSlotLeases {
+ public:
+  explicit PhysicalSlotLeases(std::uint32_t slots);
+  bool available() const noexcept { return live_ < slots_; }
+  std::uint32_t acquire(const SlotTicket&);
+  void release(std::uint32_t physical, const SlotTicket&);
+  void stalled() noexcept { ++stalls_; }
+  std::uint32_t live() const noexcept { return live_; }
+  std::uint32_t peak_live() const noexcept { return peak_live_; }
+  std::uint64_t stalls() const noexcept { return stalls_; }
+ private:
+  std::uint32_t slots_, live_ = 0, peak_live_ = 0;
+  std::uint64_t stalls_ = 0;
+  std::array<std::optional<SlotTicket>,7> owners_{};
+};
+
 // Metadata only. One serialized host owner per pool, no GPU/host allocation.
 // Tickets stay local. Source and destination credits are independent.
 class SlotPool {

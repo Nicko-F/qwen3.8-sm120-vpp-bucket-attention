@@ -78,6 +78,7 @@ class FoldedWorker(Worker):
                 self.vllm_config.scheduler_config.max_num_batched_tokens,
                 backend=transport,
                 direct_outputs=runner.vpp_direct_outputs,
+                resource_layout=self.vllm_config.additional_config.get("qwen_infra_vpp_resource_layout"),
             )
             runner.vpp_output_transport = self.vpp_transport
         return runner
@@ -253,6 +254,22 @@ class FoldedWorker(Worker):
             live_leases=len(transport.leases),
             live_producers=len(transport.producer_leases),
             live_slots={str(stage): pool.live for stage, (_, pool, _) in transport.endpoints.items()},
+            resources=transport.receipt(),
+        )
+
+    def qwen_infra_vpp_resources(self):
+        """Observe resources while loaded; native model/cache bytes stay separate."""
+        transport = self.vpp_transport
+        return dict(
+            rank=self.model_runner.vpp_rank,
+            transport=transport.receipt() if transport is not None else None,
+            cuda=dict(allocated=torch.cuda.memory_allocated(self.device),
+                      reserved=torch.cuda.memory_reserved(self.device),
+                      peak_allocated=torch.cuda.max_memory_allocated(self.device),
+                      peak_reserved=torch.cuda.max_memory_reserved(self.device)),
+            kv_cache=dict(configured_bytes=self.vllm_config.cache_config.kv_cache_memory_bytes,
+                          num_gpu_blocks=self.vllm_config.cache_config.num_gpu_blocks,
+                          block_size=self.vllm_config.cache_config.block_size),
         )
 
     def shutdown(self):

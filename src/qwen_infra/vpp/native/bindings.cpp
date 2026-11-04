@@ -69,11 +69,21 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     std::copy(data.begin(), data.end(), wire.begin());
     return match_boundary({capacity, slots}, wire, epoch, batch, sequence, stage).valid_tokens;
   });
+  py::class_<DeviceBufferArena, std::shared_ptr<DeviceBufferArena>>(m, "DeviceBufferArena")
+      .def(py::init([](SlotRole role, std::uint32_t capacity, std::uint32_t slots, c10::DeviceIndex device) {
+        return std::make_shared<DeviceBufferArena>(role, BoundaryLayout{capacity, slots}, device);
+      }))
+      .def("close", &DeviceBufferArena::close)
+      .def_property_readonly("live", &DeviceBufferArena::live)
+      .def_property_readonly("peak_live", &DeviceBufferArena::peak_live)
+      .def_property_readonly("stalls", &DeviceBufferArena::stalls)
+      .def_property_readonly("payload_bytes", &DeviceBufferArena::payload_bytes);
   py::class_<DeviceSlotPool, std::shared_ptr<DeviceSlotPool>>(m, "DeviceSlotPool")
       .def(py::init([](SlotRole role, std::uint32_t capacity, std::uint32_t slots,
-                      std::uint64_t epoch, std::uint32_t stage, c10::DeviceIndex device) {
-        return std::make_shared<DeviceSlotPool>(role, BoundaryLayout{capacity, slots}, epoch, stage, device);
-      }))
+                      std::uint64_t epoch, std::uint32_t stage, c10::DeviceIndex device,
+                      std::shared_ptr<DeviceBufferArena> arena) {
+        return std::make_shared<DeviceSlotPool>(role, BoundaryLayout{capacity, slots}, epoch, stage, device, arena);
+      }), "role"_a, "capacity"_a, "slots"_a, "epoch"_a, "stage"_a, "device"_a, "arena"_a=nullptr)
       .def("reserve", [](DeviceSlotPool& pool, py::bytes input) {
         const std::string data = input;
         TORCH_CHECK(data.size() == WireBoundary{}.size(), "expected fixed96-byte boundary");
@@ -90,6 +100,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def("record_consumer_done", &DeviceSlotPool::record_consumer_done)
       .def("discard_received", &DeviceSlotPool::discard_received)
       .def("progress", &DeviceSlotPool::progress)
+      .def("physical_slot", &DeviceSlotPool::physical_slot)
       .def("close", &DeviceSlotPool::close)
       .def_property_readonly("live", &DeviceSlotPool::live)
       .def_property_readonly("peak_live", &DeviceSlotPool::peak_live)
@@ -128,6 +139,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def(py::init<c10::DeviceIndex>())
       .def("start",&DmaProgress::start,py::call_guard<py::gil_scoped_release>())
       .def("stop",&DmaProgress::stop,py::call_guard<py::gil_scoped_release>())
+      .def("progress",&DmaProgress::progress,py::call_guard<py::gil_scoped_release>())
       .def("stats",[](DmaProgress& p) {
         const auto s=p.stats();
         return py::dict("segments"_a=s.segments,"idle_waits"_a=s.idle_waits,
@@ -152,6 +164,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       })
       .def("submit",&DmaEdge::submit,"ticket"_a,"independent_ready"_a=false,
            py::call_guard<py::gil_scoped_release>())
+      .def("peek_header", [](DmaEdge& e) -> py::object {
+        std::optional<WireBoundary> wire;
+        { py::gil_scoped_release release; wire=e.peek_header(); }
+        if (!wire) return py::none();
+        return py::bytes(reinterpret_cast<const char*>(wire->data()), wire->size());
+      })
       .def("wait_recorded",&DmaEdge::wait_recorded,py::call_guard<py::gil_scoped_release>())
       .def("progress",&DmaEdge::progress,py::call_guard<py::gil_scoped_release>())
       .def("disconnect",&DmaEdge::disconnect,py::call_guard<py::gil_scoped_release>())

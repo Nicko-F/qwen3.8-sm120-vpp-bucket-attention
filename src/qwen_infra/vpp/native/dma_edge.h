@@ -27,6 +27,7 @@ class DmaEdge {
   std::string export_event() const;
   void connect(const std::string& peer_event);
   SlotTicket reserve(const WireBoundary&, std::uint32_t timeout_ms);
+  std::optional<WireBoundary> peek_header();
   void submit(const SlotTicket&, bool independent_ready = false);
   // Wait only for this ticket's final EventRecord submission, not GPU completion.
   void wait_recorded(const SlotTicket&, std::uint32_t timeout_ms);
@@ -68,6 +69,7 @@ class DmaProgress {
   ~DmaProgress() noexcept;
   void start();
   void stop() noexcept;
+  std::uint32_t progress(); // Harvest every endpoint sharing rank-level credits.
   Stats stats() const;  // after stop, outside measured rounds
  private:
   friend class DmaEdge;

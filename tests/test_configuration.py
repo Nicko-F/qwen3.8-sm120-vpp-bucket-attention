@@ -92,10 +92,15 @@ def test_vpp_and_cpp_share_native_precision_and_resource_configuration():
     for name in cpp:
         assert cpp[name] == vpp[name]
     assert vpp["additional_config"]["qwen_infra_vpp_static_scales"] is True
+    assert vpp["additional_config"]["qwen_infra_vpp_resource_layout"] == "rank"
+    assert PrefillConfig("model", resource_layout="edge").engine_options()["additional_config"][
+        "qwen_infra_vpp_resource_layout"] == "edge"
     compatible = PrefillConfig("model", transport="nccl").engine_options()
     assert compatible["additional_config"]["qwen_infra_vpp_transport"] == "native"
     with pytest.raises(ValueError):
         PrefillConfig("model", chunk_size=16385).engine_options()
+    with pytest.raises(ValueError):
+        PrefillConfig("model", resource_layout="unknown").engine_options()
 
 
 def test_cpu_cli_does_not_import_gpu_packages():

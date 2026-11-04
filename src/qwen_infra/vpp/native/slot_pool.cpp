@@ -13,6 +13,31 @@ void require(bool condition, const char* message) {
 }
 }  // namespace
 
+PhysicalSlotLeases::PhysicalSlotLeases(std::uint32_t slots) : slots_(slots) {
+  require(slots > 0 && slots <= owners_.size(), "invalid physical arena capacity");
+}
+std::uint32_t PhysicalSlotLeases::acquire(const SlotTicket& ticket) {
+  require(available(), "physical arena has no free lease");
+  for (const auto& owner : owners_)
+    require(!owner || owner->pool_id != ticket.pool_id || owner->slot_id != ticket.slot_id,
+            "logical ticket already has a physical lease");
+  for (std::uint32_t i = 0; i < slots_; ++i) if (!owners_[i]) {
+    owners_[i] = ticket;
+    peak_live_ = std::max(peak_live_, ++live_);
+    return i;
+  }
+  throw std::logic_error("physical arena accounting mismatch");
+}
+void PhysicalSlotLeases::release(std::uint32_t physical, const SlotTicket& ticket) {
+  require(physical < slots_, "physical lease outside arena");
+  const auto& owner = owners_[physical];
+  require(owner && owner->pool_id == ticket.pool_id && owner->sequence == ticket.sequence &&
+          owner->generation == ticket.generation && owner->slot_id == ticket.slot_id,
+          "physical lease completion belongs to another ticket/generation");
+  owners_[physical].reset();
+  --live_;
+}
+
 SlotPool::SlotPool(SlotRole role, BoundaryLayout layout, std::uint64_t epoch,
                    std::uint32_t src_stage)
     : role_(role), layout_(layout), epoch_(epoch),

@@ -58,6 +58,7 @@ class PrefillConfig:
     max_num_seqs: int = 8
     gpu_memory_utilization: float = 0.85
     transport: str = "segment-dma"
+    resource_layout: str = "rank"
 
     def engine_options(self):
         if not self.model or self.profile not in PREFILL_PROFILES:
@@ -68,6 +69,8 @@ class PrefillConfig:
             raise ValueError("Invalid sequence or GPU memory budget")
         if self.transport not in ("segment-dma", "nccl"):
             raise ValueError("Expected segment-dma or nccl transport")
+        if self.resource_layout not in ("rank", "edge"):
+            raise ValueError("Expected rank or edge VPP resource layout")
         options = dict(
             model=self.model,
             tensor_parallel_size=1,
@@ -95,6 +98,7 @@ class PrefillConfig:
                     qwen_infra_vpp_direct_inputs=fast,
                     qwen_infra_vpp_direct_outputs=fast,
                     qwen_infra_vpp_static_scales=fast,
+                    qwen_infra_vpp_resource_layout=self.resource_layout if fast else "edge",
                 ),
             )
         return options

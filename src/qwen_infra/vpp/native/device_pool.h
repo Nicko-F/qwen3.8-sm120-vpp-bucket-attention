@@ -11,12 +11,32 @@
 
 namespace vpp {
 
+class DeviceBufferArena {
+ public:
+  DeviceBufferArena(SlotRole, BoundaryLayout, c10::DeviceIndex);
+  std::uint32_t live() const { return leases_.live(); }
+  std::uint32_t peak_live() const { return leases_.peak_live(); }
+  std::uint64_t stalls() const { return leases_.stalls(); }
+  std::uint64_t payload_bytes() const { return layout_.slot_bytes() * layout_.slot_count; }
+  void close();
+ private:
+  friend class DeviceSlotPool;
+  SlotRole role_;
+  BoundaryLayout layout_;
+  c10::DeviceIndex device_;
+  std::thread::id owner_;
+  PhysicalSlotLeases leases_;
+  at::Tensor storage_;
+  c10::cuda::CUDAEvent allocation_ready_;
+};
+
 // One serialized host owner, eager boundary operations outside model graphs.
 // Returned destination views are leases: no use after record_consumer_done.
 class DeviceSlotPool : public std::enable_shared_from_this<DeviceSlotPool> {
  public:
   DeviceSlotPool(SlotRole, BoundaryLayout, std::uint64_t epoch,
-                 std::uint32_t src_stage, c10::DeviceIndex device);
+                 std::uint32_t src_stage, c10::DeviceIndex device,
+                 std::shared_ptr<DeviceBufferArena> arena = nullptr);
   DeviceSlotPool(const DeviceSlotPool&) = delete;
   DeviceSlotPool& operator=(const DeviceSlotPool&) = delete;
   std::optional<SlotTicket> reserve(const WireBoundary&);
@@ -39,15 +59,18 @@ class DeviceSlotPool : public std::enable_shared_from_this<DeviceSlotPool> {
   void close();             // Requires drain; no hidden host/device synchronize.
   std::uint32_t live() const { return metadata_.live(); }
   std::uint32_t peak_live() const { return metadata_.peak_live(); }
-  std::uint64_t payload_bytes() const { return layout_.slot_bytes() * layout_.slot_count; }
+  std::uint64_t payload_bytes() const { return arena_->payload_bytes(); }
+  std::uint32_t physical_slot(const SlotTicket&) const;
   BoundaryLayout layout() const { return layout_; }
 
  private:
   friend class NcclEdge;
   friend class DmaEdge;
+  friend class DmaProgress;
   struct Events {
     c10::cuda::CUDAEvent ready, transfer_done, consumer_done;
     std::optional<SlotTicket> ticket;
+    std::uint32_t physical = 0;
     bool consumer_recorded = false, discard = false;
     std::optional<c10::cuda::CUDAStream> consumer_stream;
     std::optional<c10::cuda::CUDAStream> producer_stream;
@@ -58,6 +81,7 @@ class DeviceSlotPool : public std::enable_shared_from_this<DeviceSlotPool> {
   };
   void check_owner() const;
   c10::cuda::CUDAStream current_stream() const;
+  c10::cuda::CUDAStream transfer_stream();
   void keep_storage(const at::Tensor&, const c10::cuda::CUDAStream&);
   void require_tensor(const at::Tensor&, const BoundaryDesc&) const;
   std::pair<at::Tensor, at::Tensor> views(const SlotTicket&) const;
@@ -68,8 +92,9 @@ class DeviceSlotPool : public std::enable_shared_from_this<DeviceSlotPool> {
   c10::DeviceIndex device_;
   std::thread::id owner_;
   at::Tensor storage_;
-  c10::cuda::CUDAStream transfer_stream_;
-  c10::cuda::CUDAEvent allocation_ready_;
+  bool owns_arena_;
+  std::shared_ptr<DeviceBufferArena> arena_;
+  std::optional<c10::cuda::CUDAStream> transfer_stream_;
   std::array<Events, 7> events_{};
   bool failed_ = false, closed_ = false;
   bool backend_claimed_ = false, transport_attached_ = false;

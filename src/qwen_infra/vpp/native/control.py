@@ -129,6 +129,22 @@ class BoundaryControl:
         self._pending.popleft()
         return wire, rows
 
+    def peek_admitted(self, wire):
+        """Validate a DMA READY header against admission, without touching Gloo.
+
+        Gloo P2P Work.is_completed is not a portable receive readiness signal.
+        The DMA release/acquire protocol supplies the speculative wire; the
+        original Work/buffer remain owned until receive() verifies it on demand.
+        """
+        self._check(False)
+        if not self._pending:
+            return None
+        batch, sequence = self._pending[0]
+        self.native.check_boundary(
+            self.capacity, self.slots, self.epoch, batch, sequence, self.stage, wire
+        )
+        return batch
+
     def close(self):
         self._check(self.source)
         if self._pending:

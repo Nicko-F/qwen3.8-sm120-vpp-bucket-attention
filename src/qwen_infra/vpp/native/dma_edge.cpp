@@ -258,6 +258,17 @@ DmaProgress::Stats DmaProgress::stats() const {
   if(impl_->error) std::rethrow_exception(impl_->error);
   return impl_->counters;
 }
+std::uint32_t DmaProgress::progress() {
+  std::uint32_t retired = 0;
+  for (std::size_t i = 0; i < impl_->edge_count; ++i) {
+    auto& s = *impl_->edges[i];
+    for (const auto& t : collect(s, false))
+      if (t) s.pool->metadata_.transfer_recorded(*t);
+    check_stream(s.stream.stream());
+    retired += s.pool->progress();
+  }
+  return retired;
+}
 void DmaProgress::submit(DmaEdge::State& s,const SlotTicket& t,const BoundaryDesc& d,
     const WireBoundary& wire,char* device,cudaEvent_t ready,cudaEvent_t done,
     bool independent,std::array<cudaEvent_t,2> planes,const std::atomic<std::uint32_t>* published) {
@@ -391,11 +402,32 @@ SlotTicket DmaEdge::reserve(const WireBoundary& wire,std::uint32_t timeout_ms) {
   check(); TORCH_CHECK(timeout_ms>0 && timeout_ms<=30000,"bounded DMA credit timeout required");
   const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout_ms);
   for (;;) {
-    progress();
+    if (state_->engine) state_->engine->progress();
+    else progress();
     if(auto t=state_->pool->reserve(wire)) return *t;
     TORCH_CHECK(std::chrono::steady_clock::now()<deadline,"DMA GPU slot credit deadline expired");
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+}
+std::optional<WireBoundary> DmaEdge::peek_header() {
+  check(); auto& s = *state_;
+  TORCH_CHECK(s.engine && !s.source && connected_, "peek only a connected segmented receiver");
+  // The same lock protects next_segment and the worker's job cursor. READY
+  // acquire proves the first segment's EventRecord and immutable wire exist.
+  // No ACK/cursor changes occur here: only submit may admit a payload job.
+  std::lock_guard lock(s.engine->impl_->mutex);
+  s.engine->impl_->check();
+  if (s.next_job != next_sequence_) return std::nullopt;
+  TORCH_CHECK(s.next_segment < std::numeric_limits<std::uint32_t>::max(), "DMA sequence exhausted");
+  const auto sequence = static_cast<std::uint32_t>(s.next_segment + 1);
+  auto& control = s.control->segments[s.next_segment % kSegments];
+  const auto seen = acquire(&control.ready);
+  TORCH_CHECK(seen <= sequence, "DMA header READY overtook its generation");
+  if (seen != sequence) return std::nullopt;
+  const auto wire = control.wire;
+  const auto desc = decode_boundary(s.pool->layout_, wire);
+  TORCH_CHECK(desc.edge_sequence == next_sequence_, "DMA header sequence mismatch");
+  return wire;
 }
 void DmaEdge::submit(const SlotTicket& t,bool independent_ready) {
   check(); TORCH_CHECK(connected_,"connect both DMA endpoints before submit");
@@ -415,7 +447,7 @@ void DmaEdge::submit(const SlotTicket& t,bool independent_ready) {
   try {
     pool.keep_storage(pool.storage_,s.stream);
     if(s.engine) {
-      auto* device=static_cast<char*>(pool.storage_.data_ptr())+t.slot_id*pool.layout_.slot_bytes();
+      auto* device=static_cast<char*>(pool.storage_.data_ptr())+pool.physical_slot(t)*pool.layout_.slot_bytes();
       s.engine->submit(s,t,d,wire,device,pool.events_[t.slot_id].ready.event(),
                        pool.events_[t.slot_id].transfer_done.event(),independent_ready,
                        {pool.events_[t.slot_id].plane_ready[0].event(),pool.events_[t.slot_id].plane_ready[1].event()},
@@ -433,7 +465,7 @@ void DmaEdge::submit(const SlotTicket& t,bool independent_ready) {
       TORCH_CHECK(s.control->wire==wire,"DMA peers disagree on the96B boundary");
       C10_CUDA_CHECK(cudaStreamWaitEvent(s.stream.stream(),s.peer,0));
     }
-    auto* device=static_cast<char*>(pool.storage_.data_ptr())+t.slot_id*pool.layout_.slot_bytes();
+    auto* device=static_cast<char*>(pool.storage_.data_ptr())+pool.physical_slot(t)*pool.layout_.slot_bytes();
     auto* host=static_cast<char*>(s.payload);
     for(const auto& span:{d.hidden,d.residual}) if(span.valid_bytes) {
       C10_CUDA_CHECK(cudaMemcpyAsync(source?host+span.offset_bytes:device+span.offset_bytes,

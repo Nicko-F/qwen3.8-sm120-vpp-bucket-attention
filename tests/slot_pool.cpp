@@ -42,5 +42,30 @@ int main() {
   source.stop_admission();
   source.release_unsubmitted_on_stop(*reused);
   require(source.live() == 0);
+  // Two independent wire rings share physical storage. Both first messages
+  // have logical slot0/generation1; physical ownership must stay distinct.
+  PhysicalSlotLeases physical(2);
+  SlotPool forward(SlotRole::Source, {2048,7}, 1, 1);
+  SlotPool returning(SlotRole::Source, {2048,7}, 1, 5);
+  for (std::uint64_t sequence = 0; sequence < 24; ++sequence) {
+    const auto f = *forward.try_acquire(make_boundary({2048,7},1,sequence,sequence,1,513));
+    const auto r = *returning.try_acquire(make_boundary({2048,7},1,sequence,sequence,5,17));
+    const auto fp = physical.acquire(f), rp = physical.acquire(r);
+    require(fp != rp && f.slot_id == r.slot_id && physical.live() == 2 && !physical.available());
+    rejects([&]{ physical.release(fp,r); });
+    auto stale = f;
+    ++stale.generation;
+    rejects([&]{ physical.release(fp,stale); });
+    for (auto pair : {std::make_pair(&forward,f),std::make_pair(&returning,r)}) {
+      pair.first->producer_recorded(pair.second);
+      pair.first->transfer_recorded(pair.second);
+      pair.first->source_read_complete(pair.second);
+    }
+    physical.release(fp,f);
+    physical.release(rp,r);
+    require(physical.live() == 0);
+    rejects([&]{ physical.release(fp,f); });
+  }
+  require(physical.peak_live() == 2);
   std::cout << "boundary wire and slot-generation lifecycle passed\n";
 }

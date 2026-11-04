@@ -89,6 +89,7 @@ def _prefill(args):
         max(8, args.requests),
         args.gpu_memory_utilization,
         args.transport,
+        args.resource_layout,
     )
     options = config.engine_options()
     if args.requests < 1 or args.prompt_tokens is not None and args.prompt_tokens < 1:
@@ -193,6 +194,7 @@ def main(argv=None):
     prefill.add_argument("--model", required=True)
     prefill.add_argument("--profile", choices=PREFILL_PROFILES, default="vpp")
     prefill.add_argument("--transport", choices=("segment-dma", "nccl"), default="segment-dma")
+    prefill.add_argument("--resource-layout", choices=("rank", "edge"), default="rank")
     prefill.add_argument("--chunk-size", type=int, default=2048)
     prefill.add_argument("--max-model-len", type=int, default=32768)
     prefill.add_argument("--gpu-memory-utilization", type=float, default=0.85)
