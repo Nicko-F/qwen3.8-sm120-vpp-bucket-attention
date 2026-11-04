@@ -1,6 +1,7 @@
 """CPU checks of independent physical credits and nonblocking FIFO prefetch."""
 
 from collections import deque
+import importlib.util
 from pathlib import Path
 import shutil
 import subprocess
@@ -132,3 +133,24 @@ def test_resource_snapshot_remains_available_after_close(modules):
     transport.closed = True
     transport.close_receipt = dict(closed=True, unique_payload_bytes=5 * 2048 * 5120 * 4)
     assert transport.receipt() == transport.close_receipt
+
+
+@pytest.mark.parametrize("exception", [ValueError, RuntimeError])
+def test_gpu_stress_accepts_only_expected_native_stale_ticket_rejection(exception):
+    source = Path(__file__).resolve().parents[1] / "benchmarks/vpp_resources.py"
+    spec = importlib.util.spec_from_file_location("vpp_resource_benchmark", source)
+    benchmark = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(benchmark)
+
+    def reject(ticket):
+        raise exception("stale completion or retired ticket")
+
+    assert benchmark.check_retired_ticket(SimpleNamespace(consume=reject), object()) == 1
+    with pytest.raises(RuntimeError, match="Retired ticket accepted"):
+        benchmark.check_retired_ticket(SimpleNamespace(consume=lambda ticket: None), object())
+
+    def unrelated(ticket):
+        raise RuntimeError("CUDA failure")
+
+    with pytest.raises(RuntimeError, match="CUDA failure"):
+        benchmark.check_retired_ticket(SimpleNamespace(consume=unrelated), object())

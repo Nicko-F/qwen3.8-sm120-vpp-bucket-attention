@@ -22,6 +22,17 @@ def environment():
     prepare_jit_environment()
 
 
+def check_retired_ticket(pool, ticket):
+    """A metadata rejection maps to ValueError in ordinary pybind builds."""
+    try:
+        pool.consume(ticket)
+    except (ValueError, RuntimeError) as error:
+        if "stale completion or retired ticket" not in str(error):
+            raise
+        return 1
+    raise RuntimeError("Retired ticket accepted")
+
+
 def model_point(args):
     environment()
     from qwen_infra.config import PrefillConfig
@@ -160,12 +171,7 @@ def _stress_worker(rank, args):
         torch.cuda.synchronize(device)
         source.progress()
         destination.progress()
-        try:
-            destination.consume(dt)
-        except RuntimeError:
-            stale_rejected += 1
-        else:
-            raise RuntimeError("Retired ticket accepted")
+        stale_rejected += check_retired_ticket(destination, dt)
         source.close()
         destination.close()
         del pair
@@ -190,6 +196,10 @@ def _stress_worker(rank, args):
         if rank == 0:
             print(json.dumps(dict(mode="module", capacity=args.capacity, layout=args.layout,
                                   messages=args.messages, ranks=results)), flush=True)
+    except BaseException:
+        import traceback
+        print(json.dumps(dict(event="stress_failure", rank=rank, traceback=traceback.format_exc())), flush=True)
+        raise
     finally:
         dist.destroy_process_group()
 
