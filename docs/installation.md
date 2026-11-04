@@ -118,7 +118,10 @@ uses discovered nodes rather than assuming a two-socket host.
 ## Validation status
 
 The research implementations completed the experiments in [results](results.md).
-This newly extracted package is being checked separately for wheel contents,
-configuration, imports and bounded model integration. Until the final smoke
-record is added here, a fresh-package GPU deployment is not claimed as validated.
-No new performance matrix is required merely to change packaging.
+The extracted package passed wheel-content, configuration, import and CPU/CI
+checks, plus installed-package Decode/fusion and four-GPU VPP model smokes.
+See [package validation](validation.md) for exact coverage and native shutdown
+warnings. GPU checks used a new private environment with read-only access to
+existing tested dependencies; a fresh internet bootstrap was not independently
+executed end to end. Historical performance tables remain separate from these
+installation checks.
