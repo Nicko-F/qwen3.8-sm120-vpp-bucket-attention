@@ -1,0 +1,7 @@
+bank,native_tokens_per_second,bucket_tokens_per_second,fused_tokens_per_second
+short_c1,92.64,99.00,100.74
+uniform32,332.85,332.53,327.68
+skew16,248.03,255.70,252.99
+skew32,226.56,243.97,241.84
+mixed_2rps,448.19,494.11,495.77
+mixed_8rps,452.48,496.57,497.74

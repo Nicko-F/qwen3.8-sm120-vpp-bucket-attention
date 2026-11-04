@@ -1,0 +1,47 @@
+Qwen3.8 SM120 VPP and Bucket Attention
+Copyright 2026 Nicko-F and contributors
+
+This project contains original implementations and adaptations of open-source
+work. Modified files retain their applicable license and attribution notices.
+The project is not an official NVIDIA, Tencent, Huawei, Qwen, FlashInfer or vLLM
+release, and those names do not imply endorsement.
+
+vLLM
+Source: https://github.com/vllm-project/vllm
+License: Apache-2.0 (LICENSE)
+Native model, worker/executor, compilation and quantization interfaces are used
+and adapted by the VPP and decode integration modules. The tested runtime is
+recorded in the dependency requirements, not enforced as a source identity.
+
+VPP / vLLM Ascend
+Source: https://github.com/RookieCoder-Camera/vllm-ascend/tree/vpp-dev
+Reference revision: c409752993b80524e4af6b98ef3b69a8f9c13f2c
+Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
+License: Apache-2.0 (LICENSE)
+Folded layer placement, rank-local continuation and queue ordering are adapted
+to CUDA/vLLM. Native CUDA DMA/NCCL transport and boundary ownership are project
+implementations; the Ascend communication backend is not bundled.
+
+FlashInfer / NVIDIA XQA
+Source: https://github.com/flashinfer-ai/flashinfer/tree/main/csrc/xqa
+SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+License: Apache-2.0 (LICENSE)
+The adapted XQA implementation preserves its original license header and native
+attention arithmetic. Modifications add task intervals, persistent ownership,
+compact partial-state indexing and an optional final-output fusion. Dependency
+headers are discovered from the installed FlashInfer package.
+
+Tencent HPC-Ops
+Source: https://github.com/Tencent/hpc-ops
+Reference revision: 2a2e26562433a8ba4b504858f1c938eb7612c901
+Copyright (C) 2026 Tencent. All rights reserved.
+License: MIT (licenses/Tencent-HPC-Ops.txt)
+Global interval work assignment and benchmark length distributions inform the
+SM120 implementation. Hopper-specific kernel layouts are not claimed as a direct
+unmodified CUDA backend on SM120.
+
+CUDA, NCCL, CUTLASS, PyTorch and other installed dependencies retain their own
+licenses. Their complete runtime distributions are installed separately and are
+not relicensed by this repository. Private NVIDIA reference artifacts, model
+weights and environment archives are not distributed here.
