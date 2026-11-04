@@ -34,9 +34,15 @@ def test_actual_vllm_model_returns_finite_complete_requests(profile):
     )
     try:
         outputs = llm.generate(
-            ["Explain gravity.", "List two prime numbers."], SamplingParams(temperature=0, max_tokens=8)
+            ["Explain gravity."] * 8, SamplingParams(temperature=0, max_tokens=8, ignore_eos=True)
         )
-        assert len(outputs) == 2 and all(output.finished for output in outputs)
+        assert len(outputs) == 8 and all(output.finished for output in outputs)
         assert all(output.outputs and 1 <= len(output.outputs[0].token_ids) <= 8 for output in outputs)
+        if profile != "native":
+            status = llm.collective_rpc("qwen_infra_status", timeout=60)
+            assert len(status) == 4
+            assert all(row["fallback_reason"] is None and row["bucket_installed"] for row in status)
+            assert all(dict(rows=8, route="aligned") in row["captured"] for row in status)
+            assert all(row["last_selected_route"] == "aligned" for row in status)
     finally:
         llm.llm_engine.engine_core.shutdown()

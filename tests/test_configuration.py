@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from qwen_infra.cli import serve_command
-from qwen_infra.config import PrefillConfig, decode_contract, decode_options
+from qwen_infra.config import PrefillConfig, decode_contract, decode_options, host_reserve_bytes
 from qwen_infra.kernels.service_fusions import plain_copy
 from qwen_infra.owners import OWNER_ABI, stable_owner_key
 from qwen_infra.limits import MAX_SEQUENCE_LENGTH
@@ -86,3 +86,11 @@ def test_cpu_cli_does_not_import_gpu_packages():
     program = "from qwen_infra.cli import main; import sys; main(['doctor']); assert 'torch' not in sys.modules; assert 'vllm' not in sys.modules"
     output = subprocess.check_output([sys.executable, "-c", program], text=True, env=env, timeout=15)
     assert "packages" in json.loads(output)
+
+
+def test_optional_host_reserve_is_separate_from_transport_abi():
+    assert host_reserve_bytes("0") == 0
+    assert host_reserve_bytes("128") == 128 * 2**30
+    for value in ("-1", "1.5", "inf", "", str(1 << 64)):
+        with pytest.raises(ValueError):
+            host_reserve_bytes(value)

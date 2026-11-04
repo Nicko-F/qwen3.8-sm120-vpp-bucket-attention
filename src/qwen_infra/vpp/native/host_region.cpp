@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <linux/memfd.h>
+#include <limits>
 #include <sched.h>
 #include <sstream>
 #include <stdexcept>
@@ -16,8 +17,6 @@
 
 namespace vpp {
 namespace {
-constexpr std::uint64_t kMaxBytes = 2ULL << 30;
-constexpr std::uint64_t kReserveBytes = 128ULL << 30;
 constexpr int kSeals = F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL;
 [[noreturn]] void os_error(const char* action) {
   throw std::system_error(errno, std::generic_category(), action);
@@ -31,9 +30,14 @@ std::uint64_t page_size() {
   return static_cast<std::uint64_t>(page);
 }
 void validate(std::uint64_t bytes, int node) {
-  require(bytes > 0 && bytes <= kMaxBytes && bytes % page_size() == 0,
-          "shared region must be page aligned and at most 2GiB");
-  require(node == 0 || node == 1, "expected verified local NUMA node0 or node1");
+  require(bytes > 0 && bytes <= std::numeric_limits<std::size_t>::max() &&
+          bytes <= static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) &&
+          bytes % page_size() == 0, "shared region must be page aligned and addressable");
+  require(node >= -1, "NUMA node must be nonnegative or -1 for inherited placement");
+  if (node >= 0) {
+    std::ifstream cpus("/sys/devices/system/node/node" + std::to_string(node) + "/cpulist");
+    require(cpus.good(), "requested NUMA node does not exist");
+  }
 }
 std::uint64_t birth(int pid) {
   std::ifstream input("/proc/" + std::to_string(pid) + "/stat");
@@ -47,7 +51,9 @@ std::uint64_t birth(int pid) {
     require(static_cast<bool>(fields >> field), "incomplete owner process record");
   return std::stoull(field);
 }
-void headroom(std::uint64_t bytes) {
+void headroom(std::uint64_t bytes, std::uint64_t reserve) {
+  require(reserve <= std::numeric_limits<std::uint64_t>::max() - bytes,
+          "allocation and optional memory reserve overflow");
   std::ifstream input("/proc/meminfo");
   std::string line, key, unit;
   std::uint64_t kib = 0;
@@ -55,8 +61,9 @@ void headroom(std::uint64_t bytes) {
     std::istringstream fields(line);
     if ((fields >> key >> kib >> unit) && key == "MemAvailable:") {
       require(unit == "kB", "unexpected MemAvailable units");
-      require(kib >= (kReserveBytes + bytes) / 1024,
-              "shared region would cross the 128GiB available RAM floor");
+      const auto needed = reserve + bytes;
+      require(kib >= needed / 1024 + (needed % 1024 != 0),
+              "shared region exceeds available memory and its configured reserve");
       return;
     }
   }
@@ -65,6 +72,7 @@ void headroom(std::uint64_t bytes) {
 class LocalAffinity {
  public:
   explicit LocalAffinity(int node) {
+    if (node < 0) return;
     if (::sched_getaffinity(0, sizeof(saved_), &saved_)) os_error("getaffinity");
     cpu_set_t selected;
     CPU_ZERO(&selected);
@@ -103,9 +111,10 @@ void HostRegion::map() {
   base_ = value;
 }
 
-std::shared_ptr<HostRegion> HostRegion::create(std::uint64_t bytes, int node) {
+std::shared_ptr<HostRegion> HostRegion::create(std::uint64_t bytes, int node,
+                                             std::uint64_t minimum_available_bytes) {
   validate(bytes, node);
-  headroom(bytes);
+  headroom(bytes, minimum_available_bytes);
   auto region = std::shared_ptr<HostRegion>(new HostRegion);
   region->fd_ = static_cast<int>(::syscall(SYS_memfd_create, "qwen-vpp-activation",
                                           MFD_CLOEXEC | MFD_ALLOW_SEALING));
@@ -126,7 +135,6 @@ std::shared_ptr<HostRegion> HostRegion::create(std::uint64_t bytes, int node) {
   if (::mlock(region->base_, bytes)) os_error("mlock shared region");
   region->locked_ = true;
   affinity.restore();
-  region->verify_numa();
   return region;
 }
 
@@ -180,7 +188,8 @@ void HostRegion::verify_numa() const {
     if (field.size() < 4 || field[0] != 'N' || field.find('=') == std::string::npos) continue;
     const auto equal = field.find('=');
     const int node = std::stoi(field.substr(1, equal - 1));
-    (node == handle_.numa_node ? local : foreign) += std::stoull(field.substr(equal + 1));
+    (handle_.numa_node < 0 || node == handle_.numa_node ? local : foreign) +=
+        std::stoull(field.substr(equal + 1));
   }
   if (foreign != 0 || local != handle_.bytes / page_size())
     throw std::runtime_error("shared pages are not entirely on node" +

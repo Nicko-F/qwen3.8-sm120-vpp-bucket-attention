@@ -99,17 +99,20 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("nccl_library_info", &nccl_library_info);
   m.def("current_numa_node", [] {
     unsigned cpu=0,node=0;
-    TORCH_CHECK(::syscall(SYS_getcpu,&cpu,&node,nullptr)==0 && node<2,"cannot determine local NUMA node");
-    return node;
+    if (::syscall(SYS_getcpu,&cpu,&node,nullptr)!=0 || node>INT_MAX) return -1;
+    const auto path="/sys/devices/system/node/node"+std::to_string(node)+"/cpulist";
+    return ::access(path.c_str(),R_OK)==0 ? static_cast<int>(node) : -1;
   });
   py::class_<HostRegion,std::shared_ptr<HostRegion>>(m,"HostRegion")
-      .def_static("create_dma", [](std::uint32_t capacity,std::uint32_t slots,int node,std::uint64_t segment) {
+      .def_static("create_dma", [](std::uint32_t capacity,std::uint32_t slots,int node,std::uint64_t segment,
+                                   std::uint64_t reserve) {
         py::gil_scoped_release release;
-        return DmaEdge::create_region({capacity,slots},node,segment);
-      })
+        return DmaEdge::create_region({capacity,slots},node,segment,reserve);
+      },py::arg("capacity"),py::arg("slots"),py::arg("node")=-1,py::arg("segment_bytes")=0,
+         py::arg("minimum_available_bytes")=0)
       .def_static("attach", [](const std::array<std::int64_t,7>& h) {
         TORCH_CHECK(h[0]>0 && h[1]>=0 && h[2]>=0 && h[3]>=0 && h[4]>0 && h[4]<=INT_MAX &&
-                    h[5]>=0 && h[5]<INT_MAX && h[6]>=0 && h[6]<2,"invalid shared-region handle");
+                    h[5]>=0 && h[5]<INT_MAX && h[6]>=-1 && h[6]<=INT_MAX,"invalid shared-region handle");
         HostRegionHandle handle{std::uint64_t(h[0]),std::uint64_t(h[1]),std::uint64_t(h[2]),
           std::uint64_t(h[3]),int(h[4]),int(h[5]),int(h[6])};
         py::gil_scoped_release release; return HostRegion::attach(handle);

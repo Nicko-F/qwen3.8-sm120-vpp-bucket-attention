@@ -45,6 +45,7 @@ void publish(std::uint32_t* value, std::uint32_t sequence) noexcept {
   (void)::syscall(SYS_futex, value, FUTEX_WAKE, 1, nullptr, nullptr, 0);
 }
 std::uint64_t region_bytes(BoundaryLayout layout, std::uint64_t segment_bytes = 0) {
+  layout.validate();
   TORCH_CHECK(segment_bytes==0 || segment_bytes==4*1024*1024 ||
       segment_bytes==8*1024*1024 || segment_bytes==16*1024*1024,"unsupported DMA segment size");
   const auto bytes = segment_bytes ? segment_bytes*DmaEdge::kSegments : layout.slot_bytes();
@@ -295,8 +296,9 @@ std::array<std::optional<SlotTicket>,7> DmaProgress::collect(DmaEdge::State& s,b
 }
 
 std::shared_ptr<HostRegion> DmaEdge::create_region(BoundaryLayout layout, int node,
-                                                 std::uint64_t segment_bytes) {
-  return HostRegion::create(region_bytes(layout,segment_bytes),node);
+                                                 std::uint64_t segment_bytes,
+                                                 std::uint64_t minimum_available_bytes) {
+  return HostRegion::create(region_bytes(layout,segment_bytes),node,minimum_available_bytes);
 }
 DmaEdge::DmaEdge(std::shared_ptr<DeviceSlotPool> pool, std::shared_ptr<HostRegion> region,
                  c10::cuda::CUDAStream stream, std::uint64_t segment_bytes, DmaProgress* engine) {
@@ -332,8 +334,8 @@ DmaEdge::DmaEdge(std::shared_ptr<DeviceSlotPool> pool, std::shared_ptr<HostRegio
   C10_CUDA_CHECK(cudaHostRegister(s.payload,s.region->handle().bytes-kControlBytes,
                                  cudaHostRegisterPortable));
   s.registered=true;
-  // Registration faults the peer mapping too; verify actual pages in BOTH processes.
-  s.region->verify_numa();
+  // Registration faults the peer mapping too. NUMA placement is reported by
+  // numa_receipt(); exact locality is a deployment/performance choice.
   if(engine) {
     for(auto& e:s.local_segments)
       C10_CUDA_CHECK(cudaEventCreateWithFlags(&e,cudaEventDisableTiming|cudaEventInterprocess));

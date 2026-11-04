@@ -208,7 +208,9 @@ class ServiceFusions:
         self.warming = True
         try:
             with torch.inference_mode():
-                for rows in (32, 1, 2, 8, 33, 2048):
+                capacity = runner.max_num_tokens
+                warmup_rows = dict.fromkeys((min(32, capacity), 1, 2, 8, 33, min(2048, capacity)))
+                for rows in (row for row in warmup_rows if 1 <= row <= capacity):
                     x = torch.zeros((rows, 5120), device=runner.device, dtype=torch.bfloat16)
                     residual = torch.zeros_like(x)
                     norm = self.norm(x, residual, gamma, inverse)

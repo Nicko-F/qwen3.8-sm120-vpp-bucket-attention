@@ -5,6 +5,7 @@ import time
 
 import torch
 import torch.distributed as dist
+from qwen_infra.config import host_reserve_bytes
 
 from . import load
 from .control import BoundaryControl
@@ -80,6 +81,7 @@ class StageBoundaries:
         self.endpoints, self.leases = {}, {}
         self.failed = self.closed = False
         self.capacity = capacity
+        self.minimum_available_bytes = host_reserve_bytes()
         self.direct_outputs = direct_outputs
         self.producer_leases, self.output_stats = {}, {}
         self.engine = self.native.DmaProgress(device.index) if backend == "segment_dma" else None
@@ -134,7 +136,9 @@ class StageBoundaries:
         """Cold fixed-size Gloo identity/event exchange; no payload serialization."""
         source = self.rank == src
         region = (
-            self.native.HostRegion.create_dma(self.capacity, 7, self.native.current_numa_node(), 16 * 2**20)
+            self.native.HostRegion.create_dma(
+                self.capacity, 7, self.native.current_numa_node(), 16 * 2**20, self.minimum_available_bytes
+            )
             if source
             else None
         )

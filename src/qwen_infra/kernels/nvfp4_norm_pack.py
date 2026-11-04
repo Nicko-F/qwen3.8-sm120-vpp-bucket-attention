@@ -39,11 +39,16 @@ def build(run):
     cache = ROOT / "cache/nvfp4/norm_pack" / digest[:16]
     cache.mkdir(parents=True, exist_ok=True)
     library, log, receipt = cache / "norm_pack.so", cache / "build.log", cache / "build.json"
-    argv = [str(cuda / "bin/nvcc"), *flags, str(source), "-o", str(library)]
+    partial = cache / "norm_pack.part.so"
+    argv = [str(cuda / "bin/nvcc"), *flags, str(source), "-o", str(partial)]
     with (cache / "build.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if not library.exists():
-            with log.open("x") as output:
+        try:
+            valid = library.is_file() and json.loads(receipt.read_text()).get("identity") == digest
+        except (OSError, ValueError):
+            valid = False
+        if not valid:
+            with log.open("a") as output:
                 process = subprocess.Popen(
                     argv, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT, start_new_session=True
                 )
@@ -55,7 +60,9 @@ def build(run):
                     raise
             if status:
                 raise RuntimeError("Preserved norm/FP4 build failed: " + str(log))
-            receipt.write_text(
+            os.replace(partial, library)
+            temporary_receipt = cache / "build.part.json"
+            temporary_receipt.write_text(
                 json.dumps(
                     dict(
                         identity=digest,
@@ -65,8 +72,7 @@ def build(run):
                 )
                 + "\n"
             )
-        if not receipt.is_file() or json.loads(receipt.read_text())["identity"] != digest:
-            raise RuntimeError("Library lacks its successful immutable build receipt")
+            os.replace(temporary_receipt, receipt)
     lib = ctypes.CDLL(str(library))
     lib.nvfp4_norm_pack_launch.argtypes = [ctypes.c_void_p] * 7 + [ctypes.c_int, ctypes.c_void_p]
     lib.nvfp4_norm_pack_launch.restype = ctypes.c_int

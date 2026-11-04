@@ -71,7 +71,7 @@ def _residual_fake(normalized, residual, out, token):
     "qwen_infra_vpp::residual_record", mutates_args={"normalized", "out", "token"}, device_types="cuda"
 )
 def residual_record(normalized: torch.Tensor, out: torch.Tensor, token: torch.Tensor) -> None:
-    from .vpp_native import load
+    from .native import load
 
     # A conservative mutation of normalized makes publication precede Gate/Up
     # in the compiler's dataflow. Its numeric values are not changed. token's
@@ -86,7 +86,7 @@ def _record_fake(normalized, out, token):
 
 @torch.library.custom_op("qwen_infra_vpp::hidden_ready", mutates_args={"token"}, device_types="cuda")
 def hidden_ready(hidden: torch.Tensor, token: torch.Tensor) -> None:
-    from .vpp_native import load
+    from .native import load
 
     load().record_plane(hidden, token, 0)
 

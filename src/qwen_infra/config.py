@@ -1,11 +1,23 @@
 """CPU-only launch configuration shared by the CLI and Python examples."""
 
 from dataclasses import dataclass
+import os
 from qwen_infra.owners import OWNER_ABI
 from qwen_infra.limits import MAX_SEQUENCE_LENGTH
 
 SERVE_PROFILES = ("native", "decode-bucket", "decode-fused")
 PREFILL_PROFILES = ("cpp", "vpp")
+
+
+def host_reserve_bytes(value=None):
+    """Optional deployment RAM reserve; reusable transport defaults to zero."""
+    value = os.environ.get("QWEN_INFRA_HOST_RESERVE_GIB", "0") if value is None else value
+    if not isinstance(value, str) or not value.isascii() or not value.isdecimal():
+        raise ValueError("QWEN_INFRA_HOST_RESERVE_GIB must be an unsigned integer")
+    gib = int(value)
+    if gib > ((1 << 64) - 1) // (1 << 30):
+        raise ValueError("Host RAM reserve exceeds the unsigned-64-bit allocation ABI")
+    return gib * (1 << 30)
 
 
 def decode_options(profile):

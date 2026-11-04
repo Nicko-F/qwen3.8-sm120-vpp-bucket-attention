@@ -16,7 +16,8 @@ class DmaEdge {
  public:
   static constexpr std::uint32_t kSegments = 8;
   static std::shared_ptr<HostRegion> create_region(BoundaryLayout, int numa_node,
-                                                  std::uint64_t segment_bytes = 0);
+                                                  std::uint64_t segment_bytes = 0,
+                                                  std::uint64_t minimum_available_bytes = 0);
   DmaEdge(std::shared_ptr<DeviceSlotPool>, std::shared_ptr<HostRegion>,
           c10::cuda::CUDAStream direction_stream, std::uint64_t segment_bytes = 0,
           DmaProgress* progress = nullptr);

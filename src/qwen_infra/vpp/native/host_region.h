@@ -18,7 +18,9 @@ struct HostRegionHandle {
 // The role owner keeps this object alive until all peer mappings are retired.
 class HostRegion {
  public:
-  static std::shared_ptr<HostRegion> create(std::uint64_t bytes, int numa_node);
+  // -1 inherits placement. An optional deployment reserve is separate from ABI.
+  static std::shared_ptr<HostRegion> create(std::uint64_t bytes, int numa_node = -1,
+                                           std::uint64_t minimum_available_bytes = 0);
   static std::shared_ptr<HostRegion> attach(const HostRegionHandle&);
   ~HostRegion() noexcept;
   HostRegion(const HostRegion&) = delete;
