@@ -1,0 +1,16 @@
+name: package
+on: [push, pull_request]
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[dev]'
+      - run: python -m ruff check src tests
+      - run: python -m pytest -q -m 'not gpu'
+      - run: python -m build
+      - run: python scripts/check_wheel.py dist/*.whl
+      - run: c++ -std=c++17 -Isrc/qwen_infra/vpp/native tests/slot_pool.cpp src/qwen_infra/vpp/native/interface.cpp src/qwen_infra/vpp/native/slot_pool.cpp -o /tmp/qwen-slots && /tmp/qwen-slots

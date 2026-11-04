@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-infra"
+version = "0.1.0"
+description = "Folded VPP prefill and automatic NVFP4 bucket decode extensions for vLLM"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{name = "Nicko-F"}]
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: POSIX :: Linux"]
+
+[project.optional-dependencies]
+runtime = ["vllm>=0.32.0.dev0,<0.33", "flashinfer-python>=0.7.1,<0.8", "ninja>=1.11"]
+dev = ["pytest>=8", "ruff>=0.9", "build>=1"]
+
+[project.scripts]
+qwen-infra = "qwen_infra.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"qwen_infra.kernels" = ["*.cu", "*.cuh"]
+"qwen_infra.vpp.native" = ["*.cpp", "*.h"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["gpu: explicitly enabled CUDA/model integration checks"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["F", "E9"]

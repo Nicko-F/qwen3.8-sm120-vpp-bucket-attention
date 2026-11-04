@@ -1,0 +1,17 @@
+/.venv/
+/.source-staging/
+/build/
+/dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+/.cache/
+/models/
+/runs/
+*.safetensors
+*.pt
+*.ckpt
+.env
+.env.*
