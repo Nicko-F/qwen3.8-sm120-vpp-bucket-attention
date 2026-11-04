@@ -144,8 +144,6 @@ def _stress_worker(rank, args):
                 print(json.dumps(dict(event="stress_progress", rank=rank, batch=batch)), flush=True)
         torch.cuda.synchronize(device)
         transport.engine.progress()
-        if transport.arenas and any(arena.live for arena in transport.arenas.values()):
-            raise RuntimeError("Completed stress left live physical leases")
         # A retired native ticket must reject consumer reuse, even after logical
         # slots have wrapped. Use an isolated loopback pool to avoid poisoning a
         # live edge's publication state with a deliberately invalid operation.
@@ -180,6 +178,11 @@ def _stress_worker(rank, args):
                 if before["arenas"][name]["peak_live"] > slots:
                     raise RuntimeError("Physical arena ownership exceeded its fixed capacity")
         transport.close()
+        drained = transport.receipt()
+        if (not drained["closed"] or drained["live_leases"] or drained["producer_outputs"]["live"]
+                or drained["prefetch"]["live"] or any(a["live"] for a in drained["arenas"].values())
+                or any(p["live"] for p in drained["endpoints"].values())):
+            raise RuntimeError("Drained stress left live transport ownership")
         receipt = dict(rank=rank, received=received, stale_rejected=stale_rejected,
                        before_close=before, close=transport.receipt())
         results = [None] * 4
