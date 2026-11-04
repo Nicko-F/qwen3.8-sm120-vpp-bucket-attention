@@ -95,6 +95,9 @@ additional allocations. Reduce chunk capacity or memory budgets for your GPU.
 The research server used a 128 GiB minimum available-host-memory policy and
 same-NUMA selected-idle-device admission. Those are shared-server operating
 rules, not universal RAM/GPU-count requirements embedded in the library.
+Deployments can set `QWEN_INFRA_HOST_RESERVE_GIB` to retain host-memory headroom
+when allocating VPP shared buffers; its library default is zero. NUMA placement
+uses discovered nodes rather than assuming a two-socket host.
 
 ## Validation status
 
