@@ -1,5 +1,8 @@
 # Qwen3.8 SM120: VPP & Bucket Attention
 
+[![CI](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml/badge.svg)](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
 [中文](README.zh-CN.md) · [Architecture](docs/architecture.md) ·
 [Results](docs/results.md) · [Installation](docs/installation.md) ·
 [Contributing](CONTRIBUTING.md)
@@ -29,7 +32,7 @@ environment and starts vLLM's OpenAI-compatible server:
 git clone https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention.git
 cd qwen3.8-sm120-vpp-bucket-attention
 bash scripts/bootstrap.sh --with-toolkit -- serve \
-  --model /path/to/Qwen-NVFP4 \
+  --model nvidia/Qwen3.8-27B-NVFP4 \
   --profile decode-bucket \
   --tensor-parallel-size 4 \
   --max-model-len 32768 \
@@ -37,6 +40,9 @@ bash scripts/bootstrap.sh --with-toolkit -- serve \
 ```
 
 `--model` accepts your own local directory or Hugging Face model identifier.
+The tested checkpoint is [NVIDIA's mixed NVFP4
+release](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4); use a local copy to
+skip downloading it again.
 Select GPUs with the standard `CUDA_VISIBLE_DEVICES` environment variable.
 The four-GPU setting above is the tested model deployment, not a requirement of
 native mode. See [supported configurations](docs/installation.md#support).

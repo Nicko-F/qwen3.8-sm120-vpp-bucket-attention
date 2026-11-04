@@ -19,6 +19,17 @@ After installation, use `.venv/bin/qwen-infra` directly. Model download/loading
 is delegated to native vLLM/Hugging Face. A local model directory avoids another
 download. No model weights are bundled.
 
+The tested model is `nvidia/Qwen3.8-27B-NVFP4`, with original research revision
+`482ca0f3832238542f8f5295dde86b5f22711d80`. That revision records the experiment;
+the library accepts a model identifier or local directory without checking it
+against this historical identifier.
+
+Runtime setup also asks FlashInfer to install its matching cubin wheel and
+minimal SM120f JIT-cache provider using the official CLI. Use `--no-prefetch` for
+offline or already-provisioned environments. A failed optional download reports
+that source JIT remains necessary; it is not reported as successful prefetch.
+These prebuilt native kernels do not replace this package's custom extensions.
+
 ## Existing environment
 
 To reuse an environment containing compatible PyTorch, vLLM and FlashInfer:
@@ -78,6 +89,11 @@ Set `QWEN_INFRA_CACHE_DIR` to choose another location. Native vLLM, Hugging Face
 and PyTorch retain their standard cache controls. Build keys reflect source,
 compiler and flags; they do not grant or deny permission to run the package.
 Build parallelism respects `MAX_JOBS` and defaults to two jobs.
+Without prebuilt providers, the first launch can spend many minutes building
+native FlashInfer kernels; the observed SM120 GEMM alone took about12 minutes.
+The package's custom extensions and model compilation can also require a cold
+build. Later launches reuse normal caches; a quiet startup log alone does not
+mean model requests are running yet.
 
 Use `CUDA_VISIBLE_DEVICES` for GPU selection. Four-GPU comparisons should use
 the same ordered devices and preferably one NUMA domain. There is no hard-coded

@@ -1,5 +1,7 @@
 # Qwen3.8 SM120：VPP 与 Bucket Attention
 
+[![CI](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml/badge.svg)](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml)
+
 [English](README.md) · [架构](docs/architecture.md) ·
 [实验结果](docs/results.md) · [安装](docs/installation.md)
 
@@ -17,7 +19,7 @@
 git clone https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention.git
 cd qwen3.8-sm120-vpp-bucket-attention
 bash scripts/bootstrap.sh --with-toolkit -- serve \
-  --model /path/to/Qwen-NVFP4 \
+  --model nvidia/Qwen3.8-27B-NVFP4 \
   --profile decode-bucket --tensor-parallel-size 4 \
   --max-model-len 32768 --host 127.0.0.1 --port 8000
 ```
@@ -25,6 +27,8 @@ bash scripts/bootstrap.sh --with-toolkit -- serve \
 `--model` 可以是自己的模型目录或 Hugging Face 模型 ID。设备通过标准
 `CUDA_VISIBLE_DEVICES` 选择；缓存位置可配置。代码不要求作者的目录、环境名、
 固定 GPU 编号、历史实验文件或源码哈希。
+已测权重是 [NVIDIA 的混合 NVFP4 版本](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4)，
+已有本地副本时直接传目录即可复用。
 已有兼容 CUDA 工具链时可以省略 `--with-toolkit`；该选项只安装到私有环境中。
 
 ```bash

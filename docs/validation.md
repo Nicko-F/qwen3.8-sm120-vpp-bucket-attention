@@ -12,7 +12,7 @@ This record validates extraction and installation separately from the historical
 | Isolated lightweight wheel install | Doctor and native/decode/VPP launch previews passed without GPU dependencies. |
 | Public Linux CI | [Passed for `085d4e6`](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/runs/41860375203). |
 | Linux wheel with reused runtime | Package import closure passed from the installed virtual environment. |
-| Installed Decode/fusion model | In progress. |
+| Installed Decode/fusion model | Initial bounded run reached the native dependency compilation timeout; a prebuilt-kernel retry is being prepared. |
 | Installed VPP model | Pending the Decode stage. |
 
 The Linux runtime uses a new private virtual environment with read-only access
@@ -25,6 +25,14 @@ omitted the reused environment's Ninja executable from PATH. Its owned process
 session was cleaned and the GPUs released. The wrapper's tool discovery was
 corrected before retrying; no kernel arithmetic or package dependency was changed
 to address this operational issue.
+
+The next run reached its 1200-second limit while native FlashInfer kernels were
+still building: `gemm_sm120` completed in about12 minutes, `gemm` in about44
+seconds, and `fp4_gemm_cutlass_sm120` remained in compilation. There were no
+request-bank outputs, Python tracebacks or optimized-route receipts. Its owned
+session was cleaned. The next step uses the official matching SM120 prebuilt
+kernel provider, preserving this cache and the failed run rather than changing
+attention mathematics or restarting the same cold build from scratch.
 
 GPU checks use four selected idle GPUs in one NUMA domain, bounded threads,
 unique logs, a finite timeout and an external128 GiB available-memory floor.
