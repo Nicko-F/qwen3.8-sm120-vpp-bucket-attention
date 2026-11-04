@@ -1,8 +1,9 @@
 # Benchmarking
 
 [Results](../docs/results.md) defines the scope and limitations of the curated
-CSV tables here. They are completed historical measurements, not outputs of the
-new package's installation smoke. Raw machine logs, weights and environment
+original CSV tables here. They are completed historical measurements, not outputs
+of the new package's installation smoke. The focused VPP resource check below
+records the subsequent buffer refactor separately. Raw machine logs, weights and environment
 archives are not required to run this project.
 
 For a simple new serving comparison, launch one profile at a time, then use the
@@ -36,3 +37,23 @@ CLI](https://docs.vllm.ai/en/latest/benchmarking/cli/). Tencent's
 [HPC-Ops benchmarks](https://github.com/Tencent/hpc-ops/tree/main/benchmark)
 are the reference for length-distribution comparisons; the current attention
 implementation uses its own NVFP4 layout and supported dimensions.
+
+## Focused VPP resource check
+
+Use the installed package and four visible GPUs in one NUMA domain. Run the
+bounded transport check before loading a model:
+
+```bash
+python benchmarks/vpp_resources.py --mode module --capacity 8192 --layout rank
+python benchmarks/vpp_resources.py --model /path/to/model \
+  --capacity 2048 --layout rank --warmup 1 --repeats 3
+```
+
+Compare `--layout edge` and `--layout rank` at the same capacity. Capacity 2048
+uses four 8K prompts; capacity 8192 uses four 32K prompts. Each process loads one
+engine, primes one bank and times three complete P+1 banks. Both layouts use
+6 GiB native KV per rank and eight maximum sequences. JSON output includes
+bank times, unique communication-payload bytes, arena occupancy, prefetch,
+credit waits, CUDA memory and the drained close receipt. Capacity and layout
+choices in this script define these two focused workloads, not universal
+library shape requirements. See [resource design and results](../docs/vpp-resources.md).

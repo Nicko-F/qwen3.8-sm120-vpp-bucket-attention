@@ -48,6 +48,14 @@ It uses CUDA copy engines rather than launching a bespoke GPU data-copy CTA.
 NCCL is an alternative transport; its internal transport selection remains NCCL's
 responsibility. The library does not assume that GPU P2P is enabled or disabled.
 
+The rank-shared resource design separates a rank's physical payload storage from
+each edge's logical seven-entry sequence window. Two source slots serve both
+traversals, three receive slots hold the current consumer and bounded lookahead,
+and one stream per copy direction is shared. Source credit returns after D2H;
+receive credit returns after the compute stream's final consumer event. The
+original batch, sequence, generation and READY/ACK identities remain per edge.
+See [the resource design and focused validation plan](vpp-resources.md).
+
 The implemented VPP adapter is P+1, with TP1/PP4 and two traversals. Prefix
 caching, asynchronous scheduling, LoRA and speculative decoding are not supported
 by this adapter. Native mode has its own vLLM support surface.

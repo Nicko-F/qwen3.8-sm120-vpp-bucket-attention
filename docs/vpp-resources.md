@@ -1,0 +1,133 @@
+# Rank-shared VPP communication resources
+
+## Decision and fixed contracts
+
+Keep the eight virtual stages, TP1/PP4 folded layer layout, W=7 admission,
+7/5/3/1 warmup, Forward/Return FIFO order, native model mathematics and graphs.
+This change reorganizes communication resources, not pipeline scheduling.
+
+The starting implementation at `f2bea4e` allocates a seven-slot device pool per
+edge endpoint (`native/stages.py`). Middle ranks own four pools. One source
+stream is already shared, but incoming edges create separate receive streams.
+`receive()` only submits H2D when the stage requests its input; posting a Gloo
+header in `admit()` is not payload prefetch.
+
+Source facts come from `native/{stages.py,control.py,device_pool.cpp,dma_edge.cpp}`
+and `layout.py`. Existing segmented DMA uses one bounded C++ progress thread per
+rank, eight 16 MiB host segments per edge, generation-specific CUDA IPC events,
+and READY/ACK publication. Reuse this mechanism and its completion discipline.
+
+## Dataflow and resource budget
+
+- Use the existing serialized compute stream, one shared D2H send stream, and
+  one shared H2D receive stream per rank. Do not allocate unused per-pool copy
+  streams on this path. Native framework auxiliary streams are outside this
+  transport budget.
+- Allocate one rank-level source arena with two physical slots and one receive
+  arena with three physical slots. Retain separate per-edge sequence, batch,
+  generation and control metadata. Logical wire slots need not equal physical
+  device slots; never use a physical slot number as another edge's wire identity.
+- Logical endpoint pools may remain lightweight views over those arenas. They
+  must not each allocate payload storage. A physical lease is returned only
+  after its own D2H completion (source) or final consumer event (destination).
+  All endpoints sharing an arena must be progressed during credit waits.
+- Preserve direct hidden/residual output publication and its current-generation
+  plane events. Do not introduce a staging clone to achieve memory savings.
+- Prefetch input across both directions using admitted FIFO headers and upcoming
+  local-stage priority. At most two unconsumed speculative receives may occupy
+  the three-slot arena; preserve room for the demanded input after the previous
+  consumer finishes. Never block on an unavailable future header or enqueue a
+  receive-stream wait for a generation whose record has not been published.
+  Do not rely on Gloo `Work.is_completed()` for receive readiness: receive Work
+  implementations may finalize only in `wait()`. Instead, under the existing
+  DMA progress mutex, acquire the next segment's READY publication and inspect
+  its stable 96-byte wire descriptor. Validate it against that edge's admitted
+  FIFO before reserving a physical receive slot. Peeking must not advance ACK,
+  segment or sequence. Keep the original Gloo Work/header buffer owned; demand
+  consumption waits for and cross-checks that header before exposing the input.
+  Limit speculation to one unconsumed receive per incoming edge (two total on
+  middle ranks). No additional header thread or CUDA synchronization is needed.
+- Keep the existing host ring: 8 x 16 MiB per edge, not a full chunk per logical
+  in-flight entry. This change does not merge the six independent host/control
+  channels or change their ACK/event-reuse rules.
+
+For BF16 hidden and residual of width 5120, one slot is
+`capacity * 5120 * 2 * 2` bytes. At C8192 that is 160 MiB. Middle-rank device
+payload changes from `4 * 7 * 160 = 4480 MiB` to `5 * 160 = 800 MiB`, saving
+3680 MiB (3.59375 GiB). At C2048 it changes from 1120 to 200 MiB. These are
+communication payload allocations, not total model VRAM or host-ring storage.
+Edge ranks previously had two endpoint pools; report their savings separately.
+
+The complete group's latency can first be assessed after shared allocation,
+shared streams and cross-direction prefetch all work together. A pool-only
+intermediate implementation is not a completed performance candidate.
+
+## Edit and reuse boundary
+
+Change VPP transport/storage/control, its worker hooks, configuration, focused
+tests and documentation. Keep native CPP, Decode/bucket/fusion, model layers,
+sampling, parallel layout and existing performance tables unchanged. Retain
+the edge-owned resource layout as an explicit matched diagnostic control;
+default the completed segmented-DMA path to rank-shared resources. No paths,
+physical device IDs, run names or source hashes belong in library contracts.
+
+## Focused evidence, without a new full benchmark
+
+1. CPU ownership/control tests and one bounded GPU transport test: both
+   directions, more than seven messages, slot reuse, varying valid rows and
+   delayed readiness. Check payload identity, generation rejection, no live
+   leases at close, peak arena occupancy and credit-stall counters.
+2. Installed model anchor using the same four selected idle GPUs in one NUMA
+   domain. Compare edge-owned and rank-shared layouts at C2048 with 4 x 8K
+   prompts, and C8192 with 4 x 32K prompts. These each exercise 16 chunks;
+   retain W=7 and the same model/runtime/tactic settings. Fix native KV allocation
+   to 6 GiB/rank and max sequences to eight on both layouts so freed communication
+   memory does not merely enlarge native KV allocation. Reuse one loaded engine
+   per layout/capacity; one warm bank and three timed banks are sufficient.
+3. Record actual unique device-payload allocation, total peak VRAM, arena
+   peak-live, per-direction prefetch/issue counters, source/destination credit
+   waits and complete-bank latency. Native CUDA-event and transport receipts
+   establish ownership and prefetch; profiler/full curves are not required.
+4. Compare medians and ranges. Do not describe tiny noisy differences as a gain,
+   or attribute a regression to the original algorithm without diagnosis. Token
+   equality is not a gate for this resource refactor. Complete every request and
+   inspect transport correctness and teardown.
+
+All remote work stays below the private workspace, with bounded threads/build
+parallelism, finite timeout/heartbeat, >=128 GiB MemAvailable and task-owned
+cleanup. Only the selected four cards must be idle; preserve one NUMA domain.
+Record revisions as provenance, not runtime permission gates. Commit code and
+results in this repository; preserve the old baseline through Git.
+
+## Measured transport check
+
+The C8192 rank-shared transport check completed on four NUMA-local RTX 5090s.
+It sent 20 messages over each of six edges (120 boundary receives), with valid
+row counts 0, 1, 17, 4096 and 8192, delayed plane publication and logical-slot
+wraparound. Each rank rejected reuse of a retired ticket. The library source
+was `8161a2d`; the completed test script was `8e68e9b`.
+
+| Rank | Physical payload | Source peak | Receive peak | Forward / return prefetched and consumed | Blocking source credit waits |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 800 MiB | 2 | 2 | 0 / 2 | 2 |
+| 1 | 800 MiB | 1 | 3 | 18 / 12 | 0 |
+| 2 | 800 MiB | 2 | 3 | 14 / 18 | 1 |
+| 3 | 800 MiB | 1 | 2 | 9 / 0 | 0 |
+
+All ranks used one compute, one D2H and one H2D transport stream. Speculative
+receive occupancy peaked at two on middle ranks. No destination credit wait
+occurred. The third receive slot was actually used; reducing its capacity to
+two is not justified by this check. Stress credit waits are not model latency.
+After bounded collective close, every arena, endpoint, producer, input lease and
+prefetch queue had zero live ownership. The process exited 0 and its owned
+session was empty after cleanup.
+
+Two initial fixture failures were retained: checking zero ownership immediately
+after a single device synchronization was too early for a background DMA queue;
+the retired-ticket probe also needed to recognize pybind's `ValueError` mapping
+for `std::invalid_argument`. The completed check verifies ownership after the
+existing transport drain and accepts only the intended stale-ticket rejection.
+Neither fix changed the library, model or stage order.
+
+Evidence run: `public_vpp-resources_20261104T172246_927812Z`. Raw machine logs
+stay in the private run archive; this document records the portable summary.

@@ -102,11 +102,23 @@ global environment modification. GPU P2P policy remains a deployment choice.
 
 ## Memory planning
 
-The supported VPP boundary contains two BF16 planes of width 5120. One seven-slot
-pool requires `7 * 2 * token_capacity * 5120 * 2` bytes: 560 MiB at capacity4096.
-An interior rank can own four pools, plus registered host transport buffers.
-Model weights, native KV, recurrent state, graphs and build workspace are
-additional allocations. Reduce chunk capacity or memory budgets for your GPU.
+The supported VPP boundary contains two BF16 planes of width 5120. The segmented
+DMA path defaults to rank-shared resources: two source slots and three receive
+slots, with one send and one receive stream shared by both traversals. Use
+`prefill --resource-layout edge` for the previous edge-owned diagnostic layout.
+The seven-batch admission window and virtual-stage order are unchanged.
+
+| Chunk capacity | One boundary slot | Previous middle-rank payload | Rank-shared payload |
+| --- | --- | --- | --- |
+| 2048 | 40 MiB | 1120 MiB | 200 MiB |
+| 8192 | 160 MiB | 4480 MiB | 800 MiB |
+
+These are fixed communication payload capacities. Edge ranks previously owned
+two pools rather than four. The host path retains eight 16 MiB segments per edge;
+it does not allocate a full host chunk for every in-flight logical entry. Model
+weights, native KV, recurrent state, graphs and build workspace are additional
+allocations. See [the resource design](vpp-resources.md) for lifetime rules and
+focused validation. Reduce chunk capacity or memory budgets for your GPU.
 
 The research server used a 128 GiB minimum available-host-memory policy and
 same-NUMA selected-idle-device admission. Those are shared-server operating
