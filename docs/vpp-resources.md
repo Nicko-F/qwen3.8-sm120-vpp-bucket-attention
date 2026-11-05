@@ -245,7 +245,7 @@ earlier observations and append these longer points separately.
 
 ## Long-context measurements
 
-The 64K pair completed with the same library implementation as the earlier
+The 64K and 128K pairs completed with the same library implementation as the earlier
 checks. Only the benchmark's optional input-length parameter changed
 (`d359b15`). These points retain C8192, four requests, one warm bank, three
 timed banks, ordered NUMA-local GPUs and 6 GiB KV/rank.
@@ -253,17 +253,25 @@ timed banks, ordered NUMA-local GPUs and 6 GiB KV/rank.
 | Input/request | Edge median (s) | Shared median (s) | Shared latency change | Edge range (s) | Shared range (s) |
 | --- | --- | --- | --- | --- | --- |
 | 65536 | 11.476845 | 11.490873 | +0.12% | 11.433025–11.496515 | 11.454258–11.508391 |
+| 131072 | 34.455116 | 34.466631 | +0.03% | 34.452177–34.469092 | 34.461896–34.478624 |
 
-The 64K distributions overlap. This small difference is consistent with a tie;
-the short-bank median gains do not extend to this longer bank. Communication
+The distributions overlap at both lengths. These small differences are
+consistent with a tie; the short-bank median gains do not extend to these
+longer banks. Communication
 payload remains 4480 versus 800 MiB on middle ranks. Their allocated peaks are
-22.167967 versus 18.574217 GiB, retaining the exact 3.59375 GiB saving.
+22.167967 versus 18.574217 GiB at 64K and 22.168091 versus 18.574341 GiB at
+128K, retaining the exact 3.59375 GiB saving. The defensible long-context benefit
+is the fixed memory reduction with effectively unchanged measured bank latency.
 
 Native cache capacity was 1,218,502 tokens, with 18.59x capacity concurrency at
-65537 configured tokens and group sizes `(65537,65537,65537,2784)`. Both layouts
-had 502 cache blocks and no observed preemption messages. All source edges
-reported 132 direct publications, zero staged publications and sequence 132;
-all banks completed and transport ownership drained to zero.
+65537 configured tokens and group sizes `(65537,65537,65537,2784)`. At 128K it
+was 1,290,169 tokens, 9.84x concurrency at 131073 configured tokens and group
+sizes `(131073,131073,131073,2784)`. All four points had 502 cache blocks and
+no observed preemption messages. All source edges reported 132 direct
+publications at 64K and 260 at 128K, matching both layouts' sequences, with
+zero staged publications. All banks completed and transport ownership drained
+to zero; all owned process sessions were empty after cleanup. Native teardown
+warnings remain retained, as in the earlier checks.
 
 The shared 64K check accumulated 281 blocking credit waits (18,913.872 ms summed
 across ranks and setup/warm/timed phases), all on the source side; the control
@@ -272,5 +280,13 @@ stayed effectively unchanged. This is direct evidence that cumulative host
 credit-wait duration must not be counted as extra end-to-end delay. Shared
 source occupancy remained two and receive occupancy peaked at three.
 
-The 128K pair is the remaining follow-up; its samples will be appended to the
-same CSV without replacing the earlier measurements.
+At 128K, shared source credit waits totaled 493 calls and 64,011.216 ms across
+all ranks/phases, plus two receive waits totaling 298.295 ms. The control again
+had no blocking slot-credit waits. Buffer occupancy remained bounded at two
+source and three receive slots. The result again distinguishes host enqueue
+backpressure from lost GPU throughput; these cumulative waits are not additive
+bank delay.
+
+The [CSV](../benchmarks/vpp_resources.csv) now includes all original and
+long-context samples. No implementation tuning, profiler runs, extra repetitions
+or full benchmark curves were added to this follow-up.
