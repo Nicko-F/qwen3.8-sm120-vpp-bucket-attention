@@ -1,0 +1,45 @@
+name: Publish blog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/blog.yml'
+      - 'docs/blog/build.py'
+      - 'docs/blog/src/**'
+      - 'docs/blog/*.html'
+      - 'benchmarks/prefill.csv'
+      - 'benchmarks/decode.csv'
+      - 'benchmarks/http_fusion.csv'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@v5
+      - name: Build English and Chinese editions
+        run: |
+          python3 docs/blog/build.py
+          mkdir -p _site
+          cp docs/blog/index.html docs/blog/zh-CN.html _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5
