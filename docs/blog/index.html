@@ -3079,15 +3079,15 @@ tbody tr:hover {
       </div>
     </div>
   </section>
-  <section class="prose intro" id="intro">
-    <p>Once a model runs reliably, the next problems often hide in its timeline: one GPU finishes a chunk while the next still waits for input; most CTAs have exited while attention for the longest request keeps running; one kernel writes a result to VRAM only for the next kernel to read it back.</p>
-    <p>This article follows those execution boundaries through three optimizations for <strong>SM120, NVFP4, and vLLM</strong>. Prefill uses folded VPP to rearrange model layers and chunks across four GPUs. Decode adapts Tencent HPC-Ops KV bucketing to balance requests of different lengths across CTAs. Three fused kernels then produce the low-precision formats their downstream consumers require.<a class="ref" href="#ref-1">[1]</a></p>
+  <section class="prose intro" id="intro" aria-labelledby="abstract-heading">
+    <h2 id="abstract-heading">Abstract</h2>
+    <p>On four RTX 5090 GPUs, Qwen3.8 27B takes 17.9 ms to generate one token per request for 32 requests with 8K contexts. Give one request a 128K context and the other 31 a 4K context, and the same decode step takes 28.6 ms. The two batches differ by only 256 tokens of history in total. What changes is how that history is divided among thread blocks: the native attention kernel assigns as many blocks to a short request as it does to the long one. Most finish early while a few are left reading the long request’s KV cache. Using Tencent’s bucketing scheme to distribute KV tiles across blocks brings the mixed batch back to 18.2 ms per step.<a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-8">[8]</a></p>
+    <p>During prefill, a similar imbalance appears between GPUs. Even when a prompt is split into equal chunks, later chunks have more history to attend to. One GPU can finish a chunk before the preceding GPU has its next input ready. Folding the pipeline gives each GPU two groups of model layers, so it can alternate between the early layers of one chunk and the later layers of another. We also follow the tensors through a decode step to see which memory transfers we can eliminate. At the MLP input and on either side of attention, the kernel that produces an activation can quantize it in registers and write it directly in the format its consumer needs, saving a write and a read of the BF16 intermediate.<a class="ref" href="#ref-1">[1]</a></p>
     <div class="chapter-map">
       <a href="#prefill"><span class="map-num">01</span><span class="map-glyph" aria-hidden="true">▥ → ▥</span><strong>Across GPUs</strong><span>Keep the pipeline moving</span></a>
       <a href="#decode"><span class="map-num">02</span><span class="map-glyph" aria-hidden="true">▂ ▆ ▂ → ▄ ▄ ▄</span><strong>Across SMs</strong><span>Balance the workload</span></a>
       <a href="#fusion"><span class="map-num">03</span><span class="map-glyph" aria-hidden="true">□ → □ → ▣</span><strong>Across kernels</strong><span>Deliver data in place</span></a>
     </div>
-    <p>The experiments use four RTX 5090 GPUs on the same NUMA node. Prefill uses TP1/PP4; decode uses TP4. We retain the checkpoint's NVFP4/FP8 weight configuration, use NVFP4 for the KV cache, and keep hidden states and residuals in BF16. We start with the pipeline across GPUs.<a class="ref" href="#ref-8">[8]</a></p>
   </section>
 
   <section class="chapter" id="prefill">
@@ -3183,6 +3183,7 @@ tbody tr:hover {
       <p>In vLLM, the executor submits batches and continuations, the worker chooses stages from its local queue, and the runner selects the corresponding layers and binds their inputs and outputs. Depending on the execution path, producers may bind the source slot as their output or copy captured graph outputs into it before publishing readiness. vLLM retains model computation and sampling; the communication layer connects adjacent stages' data dependencies. VPP scheduling and DMA execution therefore have separate, explicit responsibilities.</p></div>
       <details class="experiment" id="prefill-experiment"><summary><span class="detail-icon">＋</span><span><strong>Experiment configuration, full results, and model derivation</strong><small>Configuration sweep · One / four requests · Cost model</small></span></summary><div class="experiment-body prose">
         <div class="config-grid"><div><small>Devices / parallelism</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>Data types</small><strong>NVFP4 KV · BF16 Hidden</strong></div><div><small>Workload</small><strong>4 requests · 8K–128K each</strong></div><div><small>Statistics</small><strong>Three timings per point · Median</strong></div></div>
+        <p>The four GPUs share a NUMA node. We use pipeline parallelism for prefill (TP1/PP4) and tensor parallelism for decode (TP4). Both configurations use the checkpoint’s NVFP4/FP8 weights, store the KV cache in NVFP4, and keep hidden states and residuals in BF16.</p>
         <p>The sweep covers CPP C2K/4K/8K/16K, VPP C2K/4K/8K, and DCPP reference configurations: 20 configurations, 160 shape/configuration points, and 480 timed runs. It includes Graph Off and Piecewise Graph, with an 8 GiB KV budget per rank. MTP and prefix caching are disabled. Sampling uses temperature 0.7 and top-p 0.9.</p>
         <div class="table-wrap"><table><thead><tr><th>Input tokens / request</th><th>CPP ms</th><th>VPP ms</th><th>VPP configuration</th><th>Latency reduction</th></tr></thead><tbody><tr><td>8K</td><td>832.413</td><td>795.197</td><td>2K chunk · piecewise graph</td><td>4.47%</td></tr><tr><td>32K</td><td>4,304.359</td><td>3,936.227</td><td>4K chunk · piecewise graph</td><td>8.55%</td></tr><tr><td>64K</td><td>11,647.508</td><td>10,834.357</td><td>4K chunk · piecewise graph</td><td>6.98%</td></tr><tr><td>128K</td><td>35,241.058</td><td>33,410.873</td><td>8K chunk · graph off</td><td>5.19%</td></tr></tbody></table></div>
         <h4>Why does PP add (P−1)t<sub>N</sub>?</h4><p>Assume equally fast stages and nondecreasing <i>t<sub>j</sub></i>. Induction on the recurrence gives <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>. Upstream input completion exceeds completion of the preceding local item by <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>, so taking the maximum yields this expression. Setting <i>s=P, j=N</i> gives the total completion time.</p><p>The gap between adjacent chunks on stage <i>s</i> is <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>. For fixed-size chunks, the cost increment is approximately constant. As the input grows, the longest chunk continues to grow, increasing the total fill-and-drain term. VPP rearranges these dependencies through finer stages and a folded order. The page's modeled timelines follow the same dependency recurrence.</p>
@@ -3305,7 +3306,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 <aside class="toc" id="toc" aria-label="Article contents">
   <div class="toc-heading">ON THIS PAGE<span id="read-percent">0%</span></div>
   <nav>
-    <a href="#intro" class="toc-main">Inference at three scales</a>
+    <a href="#intro" class="toc-main">Abstract</a>
     <a href="#prefill" class="toc-chapter"><span>01</span> Prefill · Across GPUs</a>
     <a href="#prefill-cost" class="toc-sub">Why later chunks cost more</a>
     <a href="#prefill-fold" class="toc-sub">Folded VPP</a>
