@@ -6,38 +6,38 @@
     norm: {
       name: ['Residual / RMSNorm / NVFP4', '残差 / RMSNorm / NVFP4'],
       input: ['x + residual + γ', 'x + residual + γ'],
-      value: ['BF16 y · 5120 values', 'BF16 y · 5120 个值'],
+      value: ['BF16 y · 5120 values', 'BF16 y · 每行 5120 个值'],
       arithmetic: ['Add → RMSNorm', '残差相加 → RMSNorm'],
-      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
-      shared: ['10 warp partials → warp 0', '10 个 Warp 的部分和 → Warp 0'],
-      bytes: ['10 KiB / direction / token', '10 KiB / 方向 / Token'],
-      output: ['FP4 + scales; BF16 residual', 'FP4 + Scale；BF16 残差'],
+      pack: ['group16 → NVFP4', '每 16 个值一组'],
+      shared: ['10 warp partials → warp 0', '10 个 warp 求和，由 warp 0 汇总'],
+      bytes: ['10 KiB / direction / token', '每个 token 读、写各 10 KiB'],
+      output: ['FP4 + scales; BF16 residual', 'FP4 和缩放因子、BF16 残差'],
       next: ['Next: NVFP4 GEMM', '下游：NVFP4 GEMM'],
-      kept: ['BF16 rounding in RF → FP4 packing', 'RF 内保留 BF16 舍入 → FP4 打包'],
+      kept: ['BF16 rounding in RF → FP4 packing', '在寄存器内舍入到 BF16，再打包成 FP4'],
     },
     front: {
-      name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 追加'],
+      name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 写入'],
       input: ['QKV projection + γ', 'QKV 投影 + γ'],
-      value: ['BF16 K · 256 values / head', 'BF16 K · 256 个值 / Head'],
+      value: ['BF16 K · 256 values / head', 'BF16 K · 每头 256 个值'],
       arithmetic: ['QK Norm → RoPE', 'QK Norm → RoPE'],
-      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
-      shared: ['4 warp partials → warp 0', '4 个 Warp 的部分和 → Warp 0'],
-      bytes: ['512 B / direction / K head', '512 B / 方向 / K Head'],
-      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q / gate：BF16；K/V：FP4 + Scale'],
-      next: ['Next: paged XQA', '下游：Paged XQA'],
+      pack: ['group16 → NVFP4', '每 16 个值一组'],
+      shared: ['4 warp partials → warp 0', '4 个 warp 求和，由 warp 0 汇总'],
+      bytes: ['512 B / direction / K head', '每个 K 头读、写各 512 B'],
+      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q 和门控值用 BF16，K/V 用 FP4 加缩放因子'],
+      next: ['Next: paged XQA', '下游：分页 XQA'],
       kept: ['K: Norm → RoPE → pack; V: pack', 'K：Norm → RoPE → 打包；V：直接打包'],
     },
     tail: {
-      name: ['Attention output / gate / FP8', 'Attention 输出 / Gate / FP8'],
-      input: ['Attention result + gate', 'Attention 结果 + Gate'],
-      value: ['BF16 O · 1536 values / rank', 'BF16 O · 1536 个值 / Rank'],
+      name: ['Attention output / gate / FP8', '注意力输出 / 门控 / FP8'],
+      input: ['Attention result + gate', '注意力结果和门控值'],
+      value: ['BF16 O · 1536 values / rank', 'BF16 O · 每卡 1536 个值'],
       arithmetic: ['Normalize / final merge', '归一化 / 最终合并'],
-      pack: ['Gate → E4M3', 'Gate → E4M3'],
+      pack: ['Gate → E4M3', '门控 → E4M3'],
       shared: ['', ''],
-      bytes: ['3 KiB / direction / token / rank', '3 KiB / 方向 / Token / Rank'],
-      output: ['8 E4M3 values / 8 B store', '8 个 E4M3 / 8 B 写出'],
+      bytes: ['3 KiB / direction / token / rank', '每卡每 token 读、写各 3 KiB'],
+      output: ['8 E4M3 values / 8 B store', '一次写出 8 个 E4M3 值（8 B）'],
       next: ['Next: FP8 output projection', '下游：FP8 输出投影'],
-      kept: ['Final writer: BF16 gate → FP8 packing', '最终 Writer：BF16 Gate → FP8 打包'],
+      kept: ['Final writer: BF16 gate → FP8 packing', '合并后做 BF16 门控，再打包成 FP8'],
     },
   };
   const canvas = document.createElement('canvas');
@@ -88,10 +88,10 @@
     let drawing = '';
 
     // Layout uses the host's CSS width as SVG units, keeping labels at their CSS size.
-    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终 O + 加载的 Gate') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
+    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终结果 O 和门控值') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
     const sm = {x: 8, y: 72, w: compact ? width - 16 : width - 210};
     const part = {x: compact ? 38 : 24, y: compact ? 160 : 174, w: compact ? width - 76 : sm.w - 32};
-    const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 14).length * 18;
+    const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'warp 调度与发射'), part.w - 38, 14).length * 18;
     const rf = {x: part.x + 12, y: part.y + 15 + schedulerHeight + 18, w: part.w - 24};
     rf.h = 48 + wrap(rfValue, rf.w - 20, 14).length * 18;
     const gap = 10;
@@ -109,7 +109,7 @@
     const blockHeight = (title, body, w) => wrap(title, w - 20, 16).length * 20 + (body ? 10 + wrap(body, w - 20, 14).length * 18 : 0);
     const shared = {x: part.x, y: part.y + part.h + 18, w: part.w, h: blockHeight(sharedTitle, sharedBody, part.w) + 24};
     sm.h = shared.y + shared.h + 20 - sm.y;
-    const memoryDetail = phase === 1 && fused ? '' : kind === 'tail' && fused && phase === 0 ? local('BF16 gate input', 'BF16 Gate 输入') : phase === 1 ? pick(operation.value) : phase === 0 ? pick(operation.input) : pick(operation.output);
+    const memoryDetail = phase === 1 && fused ? '' : kind === 'tail' && fused && phase === 0 ? local('BF16 gate input', 'BF16 门控输入') : phase === 1 ? pick(operation.value) : phase === 0 ? pick(operation.input) : pick(operation.output);
     const memoryNote = phase === 1 && !fused ? pick(operation.bytes) : phase === 2 ? pick(operation.next) : local('Global address space', '全局地址空间');
     const memoryBody = [memoryDetail, memoryNote].filter(Boolean).join(' · ');
     const memory = {x: compact ? 38 : width - 180, w: compact ? width - 76 : 164};
@@ -133,9 +133,9 @@
     drawing += `<path d="M${sm.x + 14 + miniWidth / 2} 142 V152 H${part.x + 12} V${part.y}" class="sm-expansion"/>`;
     drawing += rect(part.x, part.y, part.w, part.h, 'sm-expanded', 6);
     drawing += rect(part.x + 12, part.y + 15, part.w - 24, schedulerHeight, 'sm-unit');
-    drawing += text(part.x + part.w / 2, part.y + 15 + 10 + 14, local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 'sm-label', 'middle');
+    drawing += text(part.x + part.w / 2, part.y + 15 + 10 + 14, local('Warp scheduler / dispatch', 'warp 调度与发射'), part.w - 38, 'sm-label', 'middle');
     drawing += rect(rf.x, rf.y, rf.w, rf.h, `sm-register${phase === 1 && fused ? ' is-current' : ''}`);
-    drawing += text(rf.x + rf.w / 2, rf.y + 23, local('Register file · RF', '寄存器文件 · RF'), rf.w - 20, 'sm-heading', 'middle');
+    drawing += text(rf.x + rf.w / 2, rf.y + 23, local('Register file · RF', '寄存器组（RF）'), rf.w - 20, 'sm-heading', 'middle');
     drawing += text(rf.x + rf.w / 2, rf.y + 45, rfValue, rf.w - 20, 'sm-small', 'middle');
     const stripeWidth = (rf.w - 28) / 8;
     for (let stripe = 0; stripe < 8; stripe++) drawing += rect(rf.x + 10 + stripe * (stripeWidth + 1), rf.y + rf.h - 12, stripeWidth - 2, 5, 'sm-register-stripe', 1);
@@ -154,11 +154,11 @@
       const tile = (cuda.w - 22) / 8;
       drawing += rect(cuda.x + 8 + (lane % 8) * tile, cuda.y + 44 + Math.floor(lane / 8) * 6, tile - 2, 4, 'sm-cuda-lane', 0);
     }
-    const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: 'Final merge'}[kind];
+    const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: local('Final merge', '最终归约')}[kind];
     const arithmetic = compact ? compactArithmetic : pick(operation.arithmetic);
-    const pack = compact && kind !== 'tail' ? 'NVFP4 group16' : pick(operation.pack);
+    const pack = compact && kind !== 'tail' ? local('NVFP4 group16', '每组 16 个值') : pick(operation.pack);
     const computeLabel = phase === 0 ? arithmetic : fused || phase === 2 ? pack : arithmetic;
-    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 通道'), cuda.w - 16, 'sm-small', 'middle');
+    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 个通道'), cuda.w - 16, 'sm-small', 'middle');
     drawing += text(cuda.cx, cuda.y + 115, computeLabel, cuda.w - 16, 'sm-small', 'middle');
     drawing += rect(tensor.x, tensor.y, tensor.w, tensor.h, 'sm-unit');
     drawing += text(tensor.cx, tensor.y + 25, 'Tensor Core', tensor.w - 16, 'sm-heading', 'middle');
@@ -206,9 +206,9 @@
     if (phase === 1 && !fused) drawing += route(`M${center - 6} ${gddr.y} V${memory.y + memory.h}`, 'native', false, 'is-conditional');
     drawing += text(center + 10, memory.y + memory.h + 26, local('Miss / eviction', '未命中 / 驱逐'), memory.w / 2 - 14, 'sm-small');
 
-    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', 'Gate：L2 → LD/ST → RF；最终 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
+    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', '门控值从 L2 读入寄存器，最终结果 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
     const footerY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
-    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '输出写出')]];
+    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '写出结果')]];
     const columns = compact ? 2 : 4;
     const legendRowHeight = compact ? 42 : 24;
     legend.forEach(([color, label], index) => {
@@ -219,7 +219,7 @@
     });
     const height = footerY + (compact ? legendRowHeight * 2 : legendRowHeight);
     const defs = ['load', 'native', 'fused', 'output'].map(color => `<marker id="${id}-${color}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" class="sm-arrow-${color}"/></marker>`).join('');
-    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '四个 SMSP，展开其中一个。打包在 CUDA 通道执行；L1/共享内存是独立协作路径。GDDR7 流量取决于 L2 未命中或驱逐。')} ${caption}`;
+    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '图中展开了四个执行分区（SMSP）中的一个。CUDA 执行单元负责打包，线程可通过共享内存交换数据。L2 未命中或需要写回时才会访问 GDDR7。')} ${caption}`;
     host.innerHTML = `<svg class="sm-svg" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="${id}-title ${id}-desc" xmlns="http://www.w3.org/2000/svg"><title id="${id}-title">${escape(title)}</title><desc id="${id}-desc">${escape(description)}</desc><defs>${defs}</defs>${drawing}</svg>`;
   };
 })();

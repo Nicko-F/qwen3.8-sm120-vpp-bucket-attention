@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
-<title>在 SM120 上加速千问3.8 27B 推理</title><meta name="description" content="在四张 RTX 5090 上，通过交互图理解折返式 VPP、Decode 的 KV 分桶与三个 CUDA 融合算子。">
+<title>千问3.8 27B 在 SM120 上的推理优化</title><meta name="description" content="在四张 RTX 5090 上跑千问3.8 27B：预填充如何减少流水线等待，解码如何分摊长请求的 KV，以及三处 CUDA 算子融合能省下多少读写。">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="zh-CN" href="zh-CN.html">
 <script>
@@ -3058,75 +3058,75 @@ tbody tr:hover {
   <section class="hero" id="top">
     <div class="hero-grid">
       <div class="hero-copy">
-        <div class="eyebrow"><span class="dot"></span> ENGINEERING NOTES <span class="eyebrow-line"></span> 2026.11.05</div>
-        <h1>在 SM120 上加速<span class="hero-accent">千问3.8 27B</span> 推理</h1>
-        <p class="hero-subtitle">Prefill 的折返流水线、Decode 的 KV 分桶，以及三处 CUDA 算子融合</p>
+        <div class="eyebrow"><span class="dot"></span> 工程笔记 <span class="eyebrow-line"></span> 2026.11.05</div>
+        <h1><span class="hero-accent">千问3.8 27B</span> 在 SM120 上的推理优化</h1>
+        <p class="hero-subtitle">四卡预填充、长短请求混合解码，以及三处 CUDA 算子融合</p>
         <div class="hero-meta"><span>NICKO</span><span class="meta-divider">/</span><span>4 × RTX 5090</span><span class="meta-divider">/</span><span>SM120 · NVFP4</span></div>
         <a class="repo-card" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer"><span class="repo-symbol" aria-hidden="true">⌘</span><span><small>完整源码与实验数据</small><strong>Nicko-F / qwen3.8-sm120-vpp-bucket-attention</strong></span><span class="repo-arrow" aria-hidden="true">↗</span></a>
       </div>
       <div class="hero-results">
-        <a href="#prefill-results"><small>PREFILL · 4 个请求</small><strong class="metric-range">4.47<span class="dash">–</span>8.55<span class="unit">%</span></strong><span>延迟降低 · 相对 CPP</span></a>
-        <a href="#decode-results"><small>DECODE · B32 长短混合</small><strong class="metric-range">36.55<span class="unit">%</span></strong><span>Step 延迟降低 · 相对原生</span></a>
-        <a href="#fusion-results"><small>FUSION · 完整 Decode 调用</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>额外延迟降低 · 相对 Bucket</span></a>
+        <a href="#prefill-results"><small>预填充 · 四个等长请求</small><strong class="metric-range">4.47<span class="dash">–</span>8.55<span class="unit">%</span></strong><span>相对 CPP 的耗时降幅</span></a>
+        <a href="#decode-results"><small>解码 · 一个长请求和 31 个短请求</small><strong class="metric-range">36.55<span class="unit">%</span></strong><span>相对原生解码的单步耗时降幅</span></a>
+        <a href="#fusion-results"><small>算子融合 · 完整解码步</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>在 KV 分桶基础上进一步缩短耗时</span></a>
       </div>
     </div>
   </section>
   <section class="prose intro" id="intro">
-    <p>当模型已经能够稳定运行，接下来的问题往往藏在时间线上：一张卡结束了当前 Chunk，下一张卡还在等待输入；多数 CTA 已经退出，最长请求的 Attention 仍在运行；一个 Kernel 刚把结果写回显存，下一个 Kernel 又把它读回来。</p>
-    <p>这篇文章沿着这些执行边界，介绍三项落在 <strong>SM120、NVFP4 和 vLLM</strong> 上的优化。Prefill 采用折返式 VPP，在四张卡之间重新安排模型层与 Chunk；Decode 借鉴腾讯 HPC-Ops 的 KV 分桶，把不同长度请求的工作均衡地分配给 CTA；最后用三个融合算子，直接生成下游计算需要的低精度格式。<a class="ref" href="#ref-1">[1]</a></p>
+    <p>用四张 RTX 5090 跑千问3.8 27B 时，我们先注意到了预填充流水线里的空档：一张卡还在算，下一张卡已经空下来等它的输出。解码时，一个 128K 请求混在一批 4K 请求里，大部分线程块很快就算完了，整步解码却还得等负责长请求的那几个。算子之间也有开销。前一个刚把中间结果写回全局内存，后一个就得把同一份数据读回来。</p>
+    <p>我们分别改了这三处。预填充用折返式虚拟流水线（VPP），让同一张卡交替处理新块和旧块。解码借鉴腾讯 HPC-Ops 的做法，按历史 KV 的长度给线程块（CTA）分配工作。最后把三处相邻操作分别融合，让上游算子直接写出下游需要的量化格式。<a class="ref" href="#ref-1">[1]</a></p>
     <div class="chapter-map">
-      <a href="#prefill"><span class="map-num">01</span><span class="map-glyph" aria-hidden="true">▥ → ▥</span><strong>GPU 之间</strong><span>让流水持续推进</span></a>
-      <a href="#decode"><span class="map-num">02</span><span class="map-glyph" aria-hidden="true">▂ ▆ ▂ → ▄ ▄ ▄</span><strong>SM 之间</strong><span>让任务接近等重</span></a>
-      <a href="#fusion"><span class="map-num">03</span><span class="map-glyph" aria-hidden="true">□ → □ → ▣</span><strong>Kernel 之间</strong><span>让数据直接到位</span></a>
+      <a href="#prefill"><span class="map-num">01</span><span class="map-glyph" aria-hidden="true">▥ → ▥</span><strong>GPU 之间</strong><span>减少流水线空等</span></a>
+      <a href="#decode"><span class="map-num">02</span><span class="map-glyph" aria-hidden="true">▂ ▆ ▂ → ▄ ▄ ▄</span><strong>SM 之间</strong><span>摊开长请求的计算量</span></a>
+      <a href="#fusion"><span class="map-num">03</span><span class="map-glyph" aria-hidden="true">□ → □ → ▣</span><strong>算子之间</strong><span>少读写一次中间结果</span></a>
     </div>
-    <p>实验使用四张同 NUMA 的 RTX 5090。Prefill 走 TP1/PP4，Decode 走 TP4；权重沿用检查点的 NVFP4/FP8 配置，KV Cache 使用 NVFP4，Hidden 与 Residual 保持 BF16。我们先从 GPU 之间的流水看起。<a class="ref" href="#ref-8">[8]</a></p>
+    <p>四张卡连接到同一个 NUMA 节点。预填充用四级流水线并行（TP1/PP4），解码用四卡张量并行（TP4）。权重采用模型自带的 NVFP4/FP8 混合精度，KV 缓存用 NVFP4，隐藏状态和残差用 BF16。<a class="ref" href="#ref-8">[8]</a></p>
   </section>
 
   <section class="chapter" id="prefill">
-    <div class="chapter-heading"><div class="chapter-number">01</div><div><div class="eyebrow">PREFILL / PIPELINE PARALLELISM</div><h2>把长上下文的流水折回来</h2></div></div>
+    <div class="chapter-heading"><div class="chapter-number">01</div><div><div class="eyebrow">预填充 / 流水线并行</div><h2>用四张卡跑折返流水线</h2></div></div>
     <div class="prose" id="prefill-cost">
-      <h3>同样大小的 Chunk，后一个往往更贵</h3>
-      <p>Chunked Prefill 把长 Prompt 分成若干段，每段新增 <i>C</i> 个 Token。线性投影和 MLP 看到的输入规模大致相同，Full Attention 看到的历史却在增长：第一个 Chunk 从零开始，后面的 Chunk 还要访问之前积累的 KV。</p>
-      <p>第 <i>j</i> 个块开始时，缓存里已有 <i>H<sub>j</sub></i> 个 token。块内第一个 query 能看到历史和它自己，最后一个 query 则能看到历史和全部 <i>C</i> 个新 token。把每个 query 可见的长度相加，就得到这个块的 Q–K 配对数 <i>A<sub>j</sub></i>。</p>
+      <h3>块长相同，为什么后面的块算得更慢？</h3>
+      <p>分块预填充把长输入切成若干块，每次处理 <i>C</i> 个新 token。块长相同，线性投影和 MLP 每次的计算量也差不多。全注意力层的计算量却随历史长度增加。第一块只需看块内的 token，越往后，需要读取的历史 KV 越多。</p>
+      <p>第 <i>j</i> 块开始时，缓存里已有 <i>H<sub>j</sub></i> 个 token。由于使用因果掩码，块内第一个位置能看到 <i>H<sub>j</sub> + 1</i> 个位置，最后一个能看到 <i>H<sub>j</sub> + C</i> 个。把这 <i>C</i> 项相加，就是该块要算的 Q–K 配对数 <i>A<sub>j</sub></i>。</p>
       <div class="equation"><math display="block"><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>C</mi></munderover><mrow><mo>(</mo><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>i</mi><mo>)</mo></mrow></math><math display="block"><mo>=</mo><mi>C</mi><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mfrac><mrow><mi>C</mi><mrow><mo>(</mo><mi>C</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow></mrow><mrow><mn>2</mn></mrow></mfrac></math></div>
-      <p>以一个流水级为例，GDN、投影和 MLP 的计算时间近似与新 token 数成正比，记每个 token 的成本为 <i>a</i>。再算上每个 Q–K 配对的耗时 <i>b</i>、每个块的固定开销 <i>c</i>，就得到这个流水级处理一个块的时间。</p>
+      <p>看单个流水级。GDN、投影和 MLP 的耗时近似与新 token 数成正比，记为 <i>aC</i>。全注意力每处理一对 Q、K 的耗时记为 <i>b</i>，每块还有固定开销 <i>c</i>。三项相加，就是这个流水级处理第 <i>j</i> 块的时间。</p>
       <div class="equation"><math display="block"><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><mi>a</mi><mi>C</mi><mo>+</mo><mi>b</mi><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>c</mi></math></div>
-      <p>块长固定时，下一个块多出 <i>C</i> 个历史 token，因此在同一流水级上多花约 <strong>bC²</strong> 的时间。在常规流水线并行（CPP）里，流水级 <i>s</i> 需要等上一级送来第 <i>j</i> 个块的输入，也要等自己做完前一个块。两者中较晚的时刻，加上本块的计算时间，就是它的完成时刻。</p>
+      <p>块长固定时，相邻两块相差 <i>C</i> 个历史 token，后一个块在同一级上多花约 <strong>bC²</strong> 的时间。常规流水线并行（CPP）还得等两件事：上一级送来本块的输入，本级算完上一块。两者取较晚的时刻，再加上本块耗时，就得到它在第 <i>s</i> 级的完成时刻。</p>
       <div class="equation"><math display="block"><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>−</mo><mn>1</mn><mo>,</mo><mi>j</mi></mrow></msub><mo>,</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>)</mo></mrow><mo>+</mo><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub></math></div>
-      <p>在等速 Stage、Chunk 耗时单调增加的模型里，<i>P</i> 个 Stage 的总完成时间为 <strong>Σt<sub>j</sub> + (P−1)t<sub>N</sub></strong>。四卡情况下，尾部相当于额外承担三个最长 Chunk 的 Stage 时间。上下文越长，这一段填排开销也越明显。</p>
+      <p>假设各级算得一样快，块的耗时逐块增加。<i>P</i> 级流水线处理完 <i>N</i> 块的总时间就是 <strong>Σt<sub>j</sub> + (P−1)t<sub>N</sub></strong>。第一项是第一级处理所有块的时间。用四张卡时，最后一块离开第一级以后，还要走完剩下的三级，因此总耗时里又多了三个 <i>t<sub>N</sub></i>。</p>
     </div>
     <div class="prose" id="prefill-fold">
-      <h3>每张卡放两段模型，让新旧 Chunk 交错经过</h3>
-      <p>VPP 把 64 层划成 8 个 Virtual Stage，每段 8 层，再将层放置折成一个 U 形：GPU0 持有最前和最后两段，GPU1 持有次前和次后两段，GPU3 完成本地折返。一个 Chunk 仍然按照模型层序前进。<a class="ref" href="#ref-2">[2]</a><a class="ref" href="#ref-13">[13]</a></p>
-      <div class="topology" aria-label="八个虚拟 Stage 在四张 GPU 上折返"><div class="topology-row"><span><b>GPU0</b>S0 · L0–7</span><i>→</i><span><b>GPU1</b>S1 · L8–15</span><i>→</i><span><b>GPU2</b>S2 · L16–23</span><i>→</i><span><b>GPU3</b>S3 · L24–31</span></div><div class="fold-arrow">本地折返 <span aria-hidden="true">↓</span></div><div class="topology-row returning"><span><b>GPU0</b>S7 · L56–63</span><i>←</i><span><b>GPU1</b>S6 · L48–55</span><i>←</i><span><b>GPU2</b>S5 · L40–47</span><i>←</i><span><b>GPU3</b>S4 · L32–39</span></div></div>
-      <p>这样一来，一张 GPU 在处理较新 Chunk 的前半程时，也能穿插处理较早 Chunk 的后半程。进入稳态后，GPU0 的顺序形如 <code>S7(C0) → S0(C7) → S7(C1) → S0(C8)</code>。较短历史的 Return 与较长历史的 Forward 交错，原本集中在尾部的工作被提前穿插到流水中。</p>
-      <p>同时，单次调度的计算粒度从 16 层缩小到 8 层。每张卡保留一条 Compute Stream，按本地顺序串行执行两段模型；不同卡之间继续并行推进。最初的 Forward 预算是 <strong>7 / 5 / 3 / 1</strong>，随后自然进入 Forward / Return 交错。<a class="ref" href="#ref-9">[9]</a></p>
+      <h3>每张卡各跑两段模型</h3>
+      <p>我们把 64 层模型切成 8 段，每段 8 层。前四段从 GPU0 排到 GPU3，后四段再从 GPU3 排回 GPU0。这样，每个块都按层号从小到大计算，到 GPU3 时连续算两段，再把结果往回传。<a class="ref" href="#ref-2">[2]</a><a class="ref" href="#ref-13">[13]</a></p>
+      <div class="topology" aria-label="八个流水级在四张卡上的分布"><div class="topology-row"><span><b>GPU0</b>S0 · L0–7</span><i>→</i><span><b>GPU1</b>S1 · L8–15</span><i>→</i><span><b>GPU2</b>S2 · L16–23</span><i>→</i><span><b>GPU3</b>S3 · L24–31</span></div><div class="fold-arrow">本地折返 <span aria-hidden="true">↓</span></div><div class="topology-row returning"><span><b>GPU0</b>S7 · L56–63</span><i>←</i><span><b>GPU1</b>S6 · L48–55</span><i>←</i><span><b>GPU2</b>S5 · L40–47</span><i>←</i><span><b>GPU3</b>S4 · L32–39</span></div></div>
+      <p>以 GPU0 为例，它既负责开头的 8 层（S0），也负责末尾的 8 层（S7）。流水线填满后，它的计算顺序是 <code>S7(C0) → S0(C7) → S7(C1) → S0(C8)</code>：刚算完第 0 块的最后 8 层，就接着算第 7 块的头 8 层。旧块的收尾工作因此能穿插在新块的计算之间。</p>
+      <p>每张卡只用一条计算流，两段模型轮流算，一次调度 8 层。启动时，GPU0 到 GPU3 分别先算 <strong>7、5、3、1</strong> 个去程块，随后交替处理回程和去程。四张卡可以同时算不同的块。<a class="ref" href="#ref-9">[9]</a></p>
     </div>
 
     <figure class="interactive" id="pipeline-figure" data-widget="pipeline">
-      <div class="figure-header"><div><div class="figure-kicker">FIG. 01–02 / SCHEDULE EXPLORER</div><h4>同一份工作，两种流水</h4></div></div>
-      <div class="figure-controls"><label>Chunk 数量 <select id="pipe-count"><option value="8">8</option><option value="16" selected>16</option><option value="24">24</option></select></label><label>上下文成本 <select id="pipe-growth"><option value="0">等耗时</option><option value="0.12" selected>逐步增长</option><option value="0.24">更强的历史项</option></select></label><label>追踪 Chunk <select id="pipe-highlight"><option value="-1">全部</option></select></label></div>
+      <div class="figure-header"><div><div class="figure-kicker">图 01–02 / 流水线排程</div><h4>同样一批输入，CPP 和 VPP 怎样排程？</h4></div></div>
+      <div class="figure-controls"><label>分块数 <select id="pipe-count"><option value="8">8</option><option value="16" selected>16</option><option value="24">24</option></select></label><label>每块耗时 <select id="pipe-growth"><option value="0">等耗时</option><option value="0.12" selected>逐步增长</option><option value="0.24">增长较快</option></select></label><label>高亮分块 <select id="pipe-highlight"><option value="-1">全部</option></select></label></div>
       <div class="stepper" id="pipe-steps" role="group" aria-label="选择流水阶段"></div>
-      <div class="trace-pair"><div class="trace-panel"><div class="trace-title"><span><b>CPP</b> 4 个物理 Stage</span><span id="cpp-runtime"></span></div><div class="svg-scroll" id="cpp-timeline"></div></div><div class="trace-panel"><div class="trace-title"><span><b>VPP</b> 8 个虚拟 Stage / 4 张 GPU</span><span id="vpp-runtime"></span></div><div class="svg-scroll" id="vpp-timeline"></div></div></div>
-      <div class="figure-legend"><span><i class="key compute"></i>CPP / Forward</span><span><i class="key returning"></i>Return</span><span><i class="key idle"></i>空闲</span><span><i class="key cursor"></i>当前时间</span></div>
+      <div class="trace-pair"><div class="trace-panel"><div class="trace-title"><span><b>CPP</b> 4 个物理流水级</span><span id="cpp-runtime"></span></div><div class="svg-scroll" id="cpp-timeline"></div></div><div class="trace-panel"><div class="trace-title"><span><b>VPP</b> 4 张卡、8 个虚拟流水级</span><span id="vpp-runtime"></span></div><div class="svg-scroll" id="vpp-timeline"></div></div></div>
+      <div class="figure-legend"><span><i class="key compute"></i>CPP / VPP 去程</span><span><i class="key returning"></i>VPP 回程</span><span><i class="key idle"></i>空闲</span><span><i class="key cursor"></i>当前时间</span></div>
       <div class="figure-explanation" id="pipe-explanation" aria-live="polite"></div>
       <div class="figure-metrics" id="pipe-metrics"></div>
-      <figcaption>每行是一张 GPU。蓝块为正向，紫块为折返，块之间的空隙是 GPU 等待的时间。</figcaption>
+      <figcaption>每行是一张 GPU。蓝色是 CPP 或 VPP 去程，紫色是 VPP 回程，块之间的空隙是 GPU 等待的时间。</figcaption>
     </figure>
 
     <div class="prose" id="prefill-results">
-      <h3>从时间线回到四卡实测</h3>
-      <p>我们把四个请求放在一起计时，直到每个请求都生成第一个 token。每种输入长度都取两种方法各自测得的最佳配置，耗时取三次测量的中位数。在 8K–128K 输入范围内，VPP 的最佳配置将这四个请求的总耗时缩短了 <strong>4.47%–8.55%</strong>；32K 输入的耗时从 <strong>4.304 秒降到 3.936 秒</strong>。<a class="ref" href="#ref-8">[8]</a></p>
+      <h3>四个长请求跑下来能快多少？</h3>
+      <p>我们同时提交四个等长请求，从开始计时到四个请求都生成首个 token。每种输入长度分别取 CPP 和 VPP 各自最快的配置，报告三次计时的中位数。每个请求输入 32K 时，四个请求的总耗时从 <strong>4.304 秒降到 3.936 秒</strong>。把输入长度从 8K 扫到 128K，VPP 缩短了 <strong>4.47%–8.55%</strong> 的耗时。<a class="ref" href="#ref-8">[8]</a></p>
     </div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / PREFILL</div><h4>四个长提示词完成 Prefill 需要多久</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="Prefill 图表单位"><button data-value="relative" aria-pressed="true">相对耗时</button><button data-value="absolute" aria-pressed="false">绝对耗时</button></div></div><div id="prefill-chart" class="benchmark-bars"></div></figure>
-    <div class="prose"><p>收益来自流水中同时存在的工作。四个请求提供了充足的 Chunk 供交错执行；只有一个 8K 请求时，CPP 和 VPP 分别为 304.6 ms 与 311.0 ms。随着请求和上下文增加，VPP 对填排过程的重新组织开始发挥作用。</p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 预填充</div><h4>四个请求全部生成首个 token 的用时</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="预填充图表单位"><button data-value="relative" aria-pressed="true">相对耗时</button><button data-value="absolute" aria-pressed="false">绝对耗时</button></div></div><div id="prefill-chart" class="benchmark-bars"></div></figure>
+    <div class="prose"><p>如果只有一个 8K 请求，CPP 用 304.6 毫秒，VPP 用 311.0 毫秒，这时 CPP 快了 6.4 毫秒。四个长请求能拆出更多块，GPU 才有足够的去程和回程工作可以交替执行。</p></div>
 
-    <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>展开实现：一个 Rank 的计算与通信如何衔接</strong><small>共享缓冲 · CUDA Stream · 分段 DMA · vLLM 接入</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
-      <div class="prose"><h3>两个虚拟阶段如何共用一张 GPU</h3><p>GPU1 上的 S1 和 S6 在同一条计算流上交替执行。对同一个块，计算要等输入到齐，发送要等相应的输出就绪。对不同的块，接收流和发送流都可以在计算流工作时搬运数据。拓扑图中的实线箭头表示数据流向，虚线表示主机代理线程与各条流的控制关系。<a class="ref" href="#ref-9">[9]</a></p></div>
+    <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>单卡上的计算与通信怎么重叠？</strong><small>共享缓冲区、CUDA 流和分段传输</small></span><span class="detail-badge">实现细节</span></summary><div class="details-body">
+      <div class="prose"><h3>两个虚拟阶段如何共用一张 GPU</h3><p>在 GPU1 上，S1 和 S6 共用一条计算流。同一块必须先收到输入，算出相应的输出后才能发走。换成三个不同的块，这三件事就能重叠：计算流算当前块，接收流预取下一块，发送流搬走上一块的输出。图中实线是数据流向，虚线是主机代理线程发出的控制信号。<a class="ref" href="#ref-9">[9]</a></p></div>
       <figure class="data-figure nested" id="vpp-topology">
-        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>GPU1 上的接收、计算和发送可以并行</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">并行快照</button></div></div>
+        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">图 03 / GPU1</div><h4>GPU1 上的接收、计算和发送可以并行</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">同一时刻的三条流</button></div></div>
         <div id="rank-topology" hidden></div>
-        <div id="rank-diagram" class="rank-snapshot" role="group" aria-label="三条 CUDA Stream 在同一时刻处理不同 Chunk">
+        <div id="rank-diagram" class="rank-snapshot" role="group" aria-label="同一时刻，三条 CUDA 流各处理一个块">
           <div class="rank-time-label"><span>GPU1 的三条流</span><span>时刻 t ↓</span></div>
           <div class="rank-lanes">
             <div class="rank-lane" data-stream="h2d">
@@ -3157,50 +3157,50 @@ tbody tr:hover {
           <div class="rank-control"><span><strong>主机代理线程</strong> 提交拷贝并交换 READY / ACK</span><span><strong>GPU 拷贝引擎</strong> 执行 H2D 和 D2H 拷贝</span></div>
         </div>
       </figure>
-      <div class="prose"><p>两个阶段共用三个接收槽和两个输出槽。块长为 8K token 时，每个槽容纳 160&nbsp;MiB 的隐藏状态和残差，五个槽共占用 GPU1 上的 800&nbsp;MiB 显存。流水窗口 <code>W=7</code> 记录的是模型中同时推进的 Batch。Source 与 Receive Slot 则跟随数据的读写生命周期周转：Source 在 D2H 读完后归还，Receive 在本地 Stage 最后一次消费结束后归还。Forward 和 Return 保留各自的序列号与事件身份，共享实际的数据空间。</p><p>跨卡数据经过 <strong>GPU 显存 → 注册的 Host Ring → 下游 GPU 显存</strong>。RTX 5090 使用 GDDR7 显存。每条边的 Host Ring 有 8 个 16 MiB Segment。一份 160 MiB 的边界数据分成 10 段，接收端读完较早的 Segment 后，发送端就可以循环复用对应位置。</p></div>
-      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 04 / TRANSFER HANDOFF</div><h4>让下一次搬运提前排队</h4></div></div><div class="stepper" id="dma-steps" role="group" aria-label="选择 DMA 阶段"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>橙色表示 GPU 到主机，青色表示主机到 GPU。虚线连接完成事件和等待它的下一次搬运。</figcaption></figure>
-      <div class="prose"><p>每张 GPU 对应一个主机代理线程，负责提交拷贝并通知对端数据就绪。生产者记录输出就绪事件，CPU 侧将 D2H 和完成事件排入发送流，并发布共享内存 READY。接收端看到 READY，就把“等待这个 Event，然后 H2D”一起排入接收流。于是，当上游搬运完成，下游的 Copy Engine 已经有下一项工作可以执行。</p><p>H2D 的完成事件负责归还 Host Segment；完整输入的接收事件连接 Compute Stream；Stage 结束时记录的 Consumer Event 则归还 Receive Slot。三种完成条件分别对应三段实际使用过程，通信和计算因此能够独立向前推进。</p>
+      <div class="prose"><p>去程和回程共用三个接收槽、两个输出槽。每块有 8K 个 token 时，一份隐藏状态加残差占 160&nbsp;MiB，五个槽共占 800&nbsp;MiB。流水线允许最多七个批次同时在途（<code>W=7</code>），但每个槽只需用到最后一次读取结束：发送流读完就能归还输出槽，本级计算读完就能归还接收槽。去程和回程分别记录序号和就绪事件，通过这些信息区分共用缓冲槽里的数据。</p><p>跨卡传输要经过主机内存。每条通信链路在主机上注册一块环形缓冲区，分成 8 段，每段 16 MiB。一份 160 MiB 的输出要分 10 次搬。接收端一读完最早的一段，发送端就能复用那块空间。</p></div>
+      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">图 04 / 分段 DMA</div><h4>接收端如何提前提交下一次拷贝</h4></div></div><div class="stepper" id="dma-steps" role="group" aria-label="选择 DMA 阶段"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>橙色表示 GPU 到主机，青色表示主机到 GPU。虚线连接完成事件和等待它的下一次搬运。</figcaption></figure>
+      <div class="prose"><p>每张卡有一个主机代理线程。上游算出一段数据后，代理线程把这段数据的 D2H 拷贝和完成事件排入发送流，再通过共享内存发布 READY。下游收到通知，就可以提前把“等待该事件”和 H2D 拷贝排入接收流。这样，上游一拷完，下游的拷贝引擎就能接着搬。</p><p>每个事件只管一段依赖。H2D 完成后，主机上的这一段缓冲就能复用。整块输入到齐后，计算流才能开始算。等这个流水级用完输入，接收槽就能留给下一块。</p>
       <div class="code-block"><div class="code-heading">执行思路 / 伪代码</div><pre><code>for (batch, stage) in local_stage_order:
-    prefetch_ready_inputs()           # 每个方向最多一份未消费预取
+    prefetch_ready_inputs()           # 每个方向最多提前取一个尚未使用的输入
     input = receive_for(batch, stage)
     output = borrow_source_slot()
 
     compute.wait(input.receive_done)
-    run_stage(input, output)          # 绑定输出 Slot，或从计算图输出复制到该 Slot
+    run_stage(input, output)          # 直接写入输出槽，或把计算图的输出复制到槽中
     publish_output_events(output)
     record_consumer_done(input)
 
 # 主机代理线程提交分段拷贝，并在完成事件触发后释放对应的缓冲槽。</code></pre></div>
-      <p>在 vLLM 中，Executor 负责提交 Batch 和 Continuation，Worker 根据本地队列选择 Stage，Runner 切换对应的层并绑定输入输出。Stage 可以直接绑定 Source Slot；捕获的计算图若使用独立输出存储，则先复制到 Slot 再发布就绪事件。模型计算和采样沿用 vLLM，通信层负责把相邻 Stage 的数据依赖接起来。这样，VPP 的调度逻辑与 DMA 的执行细节各有清晰的边界。</p></div>
-      <details class="experiment" id="prefill-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、完整结果与模型推导</strong><small>配置扫描 · 单请求 / 四请求 · 成本模型</small></span></summary><div class="experiment-body prose">
-        <div class="config-grid"><div><small>设备 / 并行</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>数据类型</small><strong>NVFP4 KV · BF16 Hidden</strong></div><div><small>工作负载</small><strong>4 个请求 · 每个 8K–128K</strong></div><div><small>统计口径</small><strong>每点三次计时 · 中位数</strong></div></div>
-        <p>配置扫描覆盖 CPP C2K/4K/8K/16K、VPP C2K/4K/8K，以及 DCPP 参考配置，共 20 种配置、160 个形状/配置点、480 次计时。包含 Graph Off 与 Piecewise Graph，KV 预算为每 Rank 8 GiB，MTP 与 Prefix Caching 关闭。采样温度为 0.7，top-p 为 0.9。</p>
+      <p>在 vLLM 中，executor 提交新批次和需要继续执行的批次，worker 从本地队列选流水级，runner 绑定对应的模型层及其输入输出。常规执行时可以直接往输出槽写。如果 CUDA Graph 有自己的输出缓冲区，就先把结果复制到槽里，再通知下游。模型计算和采样都由 vLLM 执行。</p></div>
+      <details class="experiment" id="prefill-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、完整结果与模型推导</strong><small>块长选择、单请求与四请求对比、耗时模型</small></span></summary><div class="experiment-body prose">
+        <div class="config-grid"><div><small>设备 / 并行</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>数据类型</small><strong>NVFP4 KV 缓存 · BF16 隐藏状态</strong></div><div><small>工作负载</small><strong>4 个请求 · 每个 8K–128K</strong></div><div><small>统计口径</small><strong>每组计时三次，取中位数</strong></div></div>
+        <p>CPP 测了 2K、4K、8K、16K 四种块长，VPP 测了 2K、4K、8K，另测了 DCPP 作为参考。连同关闭 CUDA Graph 和启用分段图两种方式，共 20 种配置、160 组输入与配置组合，每组计时三次。每张卡给 KV 缓存预留 8 GiB，关闭 MTP 和前缀缓存，采样温度为 0.7，top-p 为 0.9。</p>
         <div class="table-wrap"><table><thead><tr><th>输入 / 请求</th><th>CPP ms</th><th>VPP ms</th><th>VPP 配置</th><th>延迟降低</th></tr></thead><tbody><tr><td>8K</td><td>832.413</td><td>795.197</td><td>2K 块 · 分段图</td><td>4.47%</td></tr><tr><td>32K</td><td>4,304.359</td><td>3,936.227</td><td>4K 块 · 分段图</td><td>8.55%</td></tr><tr><td>64K</td><td>11,647.508</td><td>10,834.357</td><td>4K 块 · 分段图</td><td>6.98%</td></tr><tr><td>128K</td><td>35,241.058</td><td>33,410.873</td><td>8K 块 · 关闭图</td><td>5.19%</td></tr></tbody></table></div>
-        <h4>为什么 PP 的附加项是 (P−1)t<sub>N</sub>？</h4><p>假设各 Stage 等速且 <i>t<sub>j</sub></i> 单调不减。由递推式可以归纳得到 <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>。其中，上游输入完成的时间比本地前一项完成时间多出 <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>，所以取最大值后得到上述表达式。令 <i>s=P、j=N</i>，便得到总完成时间。</p><p>第 <i>s</i> 个 Stage 在相邻 Chunk 间的间隙为 <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>。固定 Chunk 时，每步增量接近常数；随着输入增长，最长 Chunk 仍在变长，累计填排项随之增长。VPP 用更细的 Stage 和折返顺序重新安排这些依赖，页面中的时间线按同一个递推原则生成。</p>
+        <h4>流水线为什么多花 (P−1)t<sub>N</sub>？</h4><p>当各级等速、块耗时 <i>t<sub>j</sub></i> 单调不减时，由上面的递推式可得 <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>。对第 <i>s</i> 级来说，前一块算完后，还要等上游 <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i> 才能收到下一块。固定块长时，这段等待近似恒定。随着上下文增长，最后一块的耗时 <i>t<sub>N</sub></i> 越来越长，整条流水线的附加耗时 <i>(P−1)t<sub>N</sub></i> 也随之增加。</p>
         <p class="source-line">结果：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/prefill.csv" target="_blank" rel="noopener">prefill.csv ↗</a>　实现：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/vpp/layout.py" target="_blank" rel="noopener">layout.py ↗</a>　通信：<a href="#ref-9">VPP communication [9]</a></p>
       </div></details>
     </div></details>
   </section>
 
   <section class="chapter" id="decode">
-    <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">DECODE / KV WORK PARTITIONING</div><h2>按 KV 工作量分配 CTA</h2></div></div>
-    <div class="prose" id="decode-load"><h3>同样生成一个 Token，工作量却可能相差几十倍</h3><p>Decode 的 Query 很短：每个请求只推进一个 Token。Attention 的主要工作变成读取历史 KV，再完成 QK、Softmax 和 PV。对同一层、同一 Head 形状，KV 长度就是一个直接的工作量指标。</p><p>在当前 Qwen3.8 NVFP4、TP4 的部署中，每张 GPU 的 Full Attention 分片包含 6 个 Q Head、1 个 KV Head，Head Dimension 为 256。原生 FlashInfer XQA 为请求组织 Split-KV 并行工作。面对一个 128K 请求和一批 4K 请求时，按统一 Split 数分配的 CTA 就会出现明显的长短差。<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>32 个请求共用 170 个 CTA 的预算，原生路径给每个请求分配五个分片。在这批请求中，负责 128K 请求的最忙 CTA 要处理 103 个 tile，每个 tile 包含 256 个 token。负责 4K 请求的最忙 CTA 只需处理四个 tile。多数 CTA 结束后，Attention 的关键路径留在少数长分片上。</p></div>
-    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 05 / CTA WORKLOAD</div><h4>把每个 CTA 的工作量画出来</h4></div></div><div class="figure-controls"><label>请求分布 <select id="load-preset"><option value="skew32">128K + 31 × 4K</option><option value="skew9">128K + 8 × 4K</option><option value="uniform">32 × 8K</option></select></label></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>每根柱子代表一个 CTA。两幅图的纵轴刻度相同，单位都是 256 个 token 的 tile。</figcaption></figure>
-    <div class="prose" id="split-strategies"><h3>Split-KV 已经提供了答案，区别在工作如何组合</h3><p>FlashAttention-3 的变长 Split-KV 路径会先统计整个 Batch 的 Q/KV 工作量，估算每份工作的适宜规模，再分别计算各请求的 Split 数。长请求分配更多分片，短请求分配更少。每个分片处理本请求的连续 KV 区间，写出局部输出与 LogSumExp，随后由 Combine Kernel 完成合并。<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4 的 SM100/SM103 Split-KV 路径同样提供逐请求 Split 元数据，将 Query / Head 并行度、KV 长度和硬件容量一起纳入配置。LPT 等调度策略进一步安排工作顺序，把更重的工作提前执行。这些设计都在回答同一个问题：怎样让当前 Batch 的 Attention 工作更充分地利用 GPU。<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>腾讯 HPC-Ops 的做法更直接地面向整个 Batch：把各请求的 KV 工作连成一条轴，再按 CTA 预算切开。一个 Bucket 可以在处理完上一个请求的尾部后，继续处理下一个请求的开头。这里迁移的就是这条路线：<strong>借鉴 HPC-Ops 的全局 KV 工作划分，用 FlashInfer XQA 作为 SM120 上的 NVFP4 计算主体。</strong><a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
-      <div class="strategy-cards"><div><small>ADAPTIVE SPLIT-KV</small><strong>先确定每个请求分几份</strong><p>按长度计算 Split 数；每个 Split 处理本请求的一段 KV。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>GLOBAL KV BUCKET</small><strong>先确定每个 CTA 承担多少</strong><p>跨请求填充等工作量 Bucket；一个 CTA 可以顺序执行多个 Task。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
-      <h3>Tile、Task、Bucket：三个粒度，一条执行路径</h3><p>一个 <strong>tile</strong> 最多装 256 个 KV token。把第 <i>i</i> 个请求的长度除以 256 并向上取整，就得到它占用的 tile 数 <i>n<sub>i</sub></i>。一个 <strong>task</strong> 处理同一请求中的一段连续 tile，分给一个 CTA 的所有 task 组成一个 <strong>bucket</strong>。将全批次的 tile 数相加，除以 CTA 数量并向上取整，就得到每桶的目标大小，最少取两个 tile。</p>
+    <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">解码 / KV 工作划分</div><h2>解码：按 KV 长度分配工作</h2></div></div>
+    <div class="prose" id="decode-load"><h3>同样生成一个 token，工作量却可能相差几十倍</h3><p>解码时，每个请求只生成一个新 token，Q 的长度很短，注意力计算的大部分工作都花在读取历史 KV、计算 QK、softmax 和 PV 上。对于同一层、同样大小的注意力头，KV 越长，要读的数据和要算的点积就越多。</p><p>本项目使用 Qwen3.8 NVFP4 模型和 TP4。每张卡上的全注意力层分片包含 6 个 Q 头、1 个 KV 头，头维度为 256。原生 FlashInfer XQA 用 Split-KV 把一个请求拆成几份并行计算。如果每个请求分到的份数相同，128K 请求的每一份就比 4K 请求重得多。<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>举个例子。32 个请求分给 170 个 CTA，原生 XQA 给每个请求分五片。负责 128K 请求的最忙 CTA 要处理 103 个 KV 块（tile），每块含 256 个 token；负责 4K 请求的最忙 CTA 只需处理四块。多数 CTA 很快完成，整次注意力计算却还要等少数几个长分片结束。</p></div>
+    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">图 05 / CTA 工作量</div><h4>长请求让少数 CTA 忙到最后</h4></div></div><div class="figure-controls"><label>请求分布 <select id="load-preset"><option value="skew32">128K + 31 × 4K</option><option value="skew9">128K + 8 × 4K</option><option value="uniform">32 × 8K</option></select></label></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>每根柱子代表一个 CTA，纵轴为 KV 块数，每块含 256 个 token。两幅图使用相同刻度。</figcaption></figure>
+    <div class="prose" id="split-strategies"><h3>从按请求拆分，到跨请求均分</h3><p>FlashAttention-3 的变长 Split-KV 路径已经能按请求长度调整分片数：先统计整个批次的 Q/KV 工作量，估算每个分片应承担多少工作，再为长请求分配更多分片、为短请求分配更少分片。每个分片处理一个请求内的连续 KV 区间，写出局部输出和 LogSumExp，最后由合并内核汇总结果。<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4 的 SM100/SM103 Split-KV 路径也支持逐请求分片配置，同时考虑查询与注意力头的并行度、KV 长度和硬件容量。LPT 等调度策略则进一步调整执行顺序，让较重的任务先运行。这些方法都在减少任务轻重不均造成的空闲，让一个批次的注意力计算充分利用 GPU。<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>腾讯 HPC-Ops 将分配范围扩展到整个批次：先把所有请求的 KV 工作首尾相接，再按 CTA 预算切分。这样，一个 CTA 处理完前一个请求的末尾后，还可以继续处理下一个请求的开头。本项目沿用了这种划分方式：<strong>用 HPC-Ops 的全局 KV 分桶方法分配工作，在 SM120 上用 FlashInfer XQA 读取 NVFP4 KV 缓存并计算注意力。</strong><a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
+      <div class="strategy-cards"><div><small>自适应 SPLIT-KV</small><strong>每个请求该拆成几片</strong><p>根据长度确定分片数，每片只处理一个请求的 KV。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>全局 KV 分桶</small><strong>每个 CTA 该分到多少工作</strong><p>跨请求凑出工作量相近的桶，一个 CTA 依次处理桶内的多个子任务。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
+      <h3>KV 块、子任务、任务桶如何对应</h3><p>分配从 <strong>KV 块（tile）</strong>开始，每块最多包含 256 个 token。第 <i>i</i> 个请求的长度除以 256，再向上取整，就是块数 <i>n<sub>i</sub></i>。同一请求内的一段连续块组成一个<strong>子任务（Task）</strong>，分给同一 CTA 的所有子任务组成一个<strong>任务桶（Bucket）</strong>。把全批次的块数相加，除以 CTA 数量并向上取整，就得到每桶的目标块数，最少取两块。</p>
       <div class="equation"><math display="block"><mi>B</mi><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><mn>2</mn><mo>,</mo><mo>⌈</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>n</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><msub><mi>N</mi><mtext>CTA</mtext></msub></mrow></mfrac><mo>⌉</mo><mo>)</mo></mrow></math></div>
-      <p>在前面的 B32 例子里，总工作量为 <i>511 + 31 × 16 = 1007</i> 个 Tile，Bucket 预算为 6。按请求顺序向桶里放 tile。装到下一个请求时，在同一个桶里新开一个 task。GPU 上的 Assign Kernel 每个 Decode Step 生成一次任务映射，兼容的 Full Attention 层复用这份映射。<a class="ref" href="#ref-7">[7]</a></p>
+      <p>前面的 B32 批次共有 <i>511 + 31 × 16 = 1007</i> 个 KV 块，算出每桶的目标大小为 6 块。按请求顺序填桶，跨过请求边界时，就在当前桶里新建一个子任务。GPU 上的 Assign 内核每个解码步生成一次分配表，形状兼容的全注意力层复用同一张表。<a class="ref" href="#ref-7">[7]</a></p>
     </div>
-    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 06 / ASSIGN → COMPUTE</div><h4>一步步把请求变成 CTA 的工作</h4></div></div><div class="figure-controls"><label>工作示例 <select id="bucket-preset"><option value="teaching">4 请求 / 8 CTA · 9, 3, 2, 1 Tiles</option><option value="real">128K + 31 × 4K</option></select></label><label>追踪 CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="选择分桶阶段"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>查看当前任务表</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>每种颜色对应一个请求。一个桶内的颜色发生变化时，就开始了新的 task。</figcaption></figure>
-    <div class="prose"><p>Compute 阶段启动固定规模的 CTA 网格，每个 CTA 读出自己的 Bucket，在内部依次执行 Task。一个 Task 遍历自己覆盖的多个 KV Tile，持续更新 Online Softmax 状态，结束时写出一份 Partial。跨请求切换时，CTA 复用计算资源，为下一份 Task 建立新的状态。</p><p>这保留了 XQA 的 KV 加载、QK/PV 和 Softmax 数据通路，同时把工作分配从“每请求固定几份”变为“每 CTA 近似等量”。分桶改变的是全 GPU 的任务组织；Attention 的数值计算仍由成熟的 XQA 内核完成。</p></div>
-    <div class="prose" id="decode-results"><h3>长短混合请求中的收益最明显</h3><p>TP4 解码时，每个请求生成 256 个 token。各组都用第 17 至 240 个输出 token 统计完整模型的单步耗时。B9 长短混合负载从 <strong>20.04 ms 降到 14.37 ms</strong>；B32 从 <strong>28.63 ms 降到 18.16 ms</strong>，对应 28.28% 和 36.55% 的延迟降低。均匀 B32 的两条路径都在 17.9 ms 左右。工作越偏斜，全局分配可收回的尾部时间越多。<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FULL-MODEL DECODE</div><h4>把长请求的工作摊开</h4></div><span class="figure-tag">ms / step ↓</span></div><div id="decode-chart" class="benchmark-bars"></div></figure>
-    <div class="prose"><p>同样的优化也进入了服务路径。混合长度 HTTP 到达负载下，Bucket 的输出吞吐相对原生提升约 <strong>10%–11%</strong>。运行时保留 Native、Aligned 和 Persistent 三种路线，根据请求长度分布选择合适的执行组织：均匀工作沿用轻量路径，明显偏斜时使用全局 Bucket。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">图 06 / 从分配到计算</div><h4>一个批次如何分给各个 CTA</h4></div></div><div class="figure-controls"><label>示例 <select id="bucket-preset"><option value="teaching">4 个请求 / 8 个 CTA · 块数 9、3、2、1</option><option value="real">128K + 31 × 4K</option></select></label><label>跟踪 CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="选择分桶阶段"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>查看当前任务表</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>颜色区分请求；同一个桶里出现不同颜色，表示它包含多个请求的子任务。</figcaption></figure>
+    <div class="prose"><p>Compute 阶段启动固定规模的 CTA 网格。每个 CTA 读取自己的任务桶，依次执行其中的子任务。一个子任务连续处理多个 KV 块，用 online softmax 累积计算，结束时写出一份局部结果（Partial）。如果下一个子任务属于另一个请求，CTA 就重新初始化计算状态，再继续执行。</p><p>分桶保留了 XQA 的 KV 加载、QK/PV 和 softmax 计算，只重新安排这些计算由谁来做：原生路径给每个请求相同的分片数，全局分桶则尽量让每个 CTA 承担相近的工作量。</p></div>
+    <div class="prose" id="decode-results"><h3>长短请求混在一起，收益最明显</h3><p>在 TP4 模型测试中，每个请求生成 256 个 token，各组统一用第 17 至 240 个输出 token 统计完整模型的单步耗时。9 个请求的长短混合批次（B9）从 <strong>20.04 ms 降到 14.37 ms</strong>；32 个请求的混合批次（B32）从 <strong>28.63 ms 降到 18.16 ms</strong>，延迟分别降低 28.28% 和 36.55%。32 个等长请求则都在 17.9 ms 左右。长短请求带来的工作量差距越大，分桶越能缩短等待长分片的时间。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 完整模型解码</div><h4>长请求分给更多 CTA 后，单步耗时怎么变？</h4></div><span class="figure-tag">毫秒 / 步 ↓</span></div><div id="decode-chart" class="benchmark-bars"></div></figure>
+    <div class="prose"><p>在混合长度请求持续到达的 HTTP 测试中，Bucket 的输出吞吐也比原生路径高约 <strong>10%–11%</strong>。运行时保留 Native、Aligned 和 Persistent 三种执行路径，根据请求长度分布选择：工作量均匀时走开销较小的路径，长短差异明显时使用全局分桶。<a class="ref" href="#ref-8">[8]</a></p></div>
 
-    <details class="deep-dive" id="decode-implementation"><summary><span class="detail-icon">＋</span><span><strong>展开实现：任务表、Persistent XQA 与最后一次归约</strong><small>一份映射跨层复用 · 每 Task 一份 Partial · Last-CTA Merge</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
-      <div class="prose"><h3>Assign 描述工作，Compute 消费工作</h3><p>Assign 用一个轻量 GPU Kernel 读取各请求的长度，计算 Tile 前缀和，构建三张表：<code>tasks</code> 记录请求内的 KV 区间，<code>buckets</code> 记录 CTA 对应的 Task 范围，<code>requests</code> 记录同一请求的 Partial 起点和数量。跨请求的 Bucket 会产生多份 Task，因此任务表按 <code>NCTA + batch − 1</code> 预留容量。</p>
-      <div class="code-block"><div class="code-heading">核心分配 / 伪代码</div><pre><code>tiles[i] = ceil(kv_length[i] / 256)
+    <details class="deep-dive" id="decode-implementation"><summary><span class="detail-icon">＋</span><span><strong>实现细节：任务表、逐桶计算与最终归约</strong><small>任务表跨层复用 · 每个子任务一份局部结果 · Last-CTA Merge</small></span><span class="detail-badge">实现</span></summary><div class="details-body">
+      <div class="prose"><h3>Assign 建表，Compute 按表执行</h3><p>Assign 是一个轻量 GPU 内核。它读取各请求的长度，计算 KV 块数的前缀和，再构建三张表：<code>tasks</code> 记录每个子任务处理的请求及 KV 区间，<code>buckets</code> 记录每个 CTA 负责哪些子任务，<code>requests</code> 记录各请求的局部结果从哪里开始、共有多少份。一个桶跨过请求边界时会拆出多个子任务，因此任务表按 <code>NCTA + batch − 1</code> 预留容量。</p>
+      <div class="code-block"><div class="code-heading">任务分配与执行 / 伪代码</div><pre><code>tiles[i] = ceil(kv_length[i] / 256)
 budget = max(2, ceil(sum(tiles) / num_ctas))
 
 for request in batch:
@@ -3209,41 +3209,41 @@ for request in batch:
         buckets[overlap.bucket].append(tasks.last)
         requests[request].append(tasks.last)
 
-# 同一个 Decode Step 的兼容 Full Attention 层复用这张表。
+# 同一个解码步中，形状兼容的全注意力层复用这张表。
 for task in buckets[blockIdx.x]:
-    partial = xqa_attention(task)     # Task 内连续处理多个 Tile
+    partial = xqa_attention(task)     # 一个子任务连续处理多个 KV 块
     publish_and_maybe_merge(partial)</code></pre></div>
-      <p>共享任务表的地址在 CUDA Graph 捕获前固定下来。每次 Forward，Assign 更新表内内容；各 Attention 层绑定自己的 Q、KV 与输出，再执行相同的工作映射。页面上看到的“动态”，就发生在这份小型描述表中。</p>
-      <h3>Partial 按 Task 保存，最后完成者负责合并</h3><p>每个 Task 对应一段 KV 区间。对每个 Query Head，它写出归一化的局部输出 <i>O<sub>i</sub></i>、局部最大值 <i>m<sub>i</sub></i> 和指数和 <i>l<sub>i</sub></i>。这些量在 Global Scratch 中按 Task Slot 保存；当前 TP4 形状下，局部输出的有效尺寸为 <i>6 × 256</i>。</p><p>Task 写完 Partial 后更新请求级完成计数器。该请求最后完成的 Task 所在 CTA 取得归约职责，读取所有 Partial，直接写出最终结果。这个 Merge 复用 XQA 的内核内归约路径，与分片计算处于同一次 Compute Launch。<a class="ref" href="#ref-7">[7]</a></p></div>
-      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 07 / LAST-CTA MERGE</div><h4>最后完成的 Task 接过归约</h4></div></div><div class="stepper" id="merge-steps" role="group" aria-label="选择 Task 完成阶段"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div></figure>
-      <div class="prose"><p>合并时，先取各分片里的最大值 <i>m</i>，以它为基准重新计算每个分片的 softmax 权重，再对局部输出加权平均。</p><div class="equation"><math display="block"><mi>m</mi><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>,</mo></math><math display="block"><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo><msub><mi>l</mi><mrow><mi>i</mi></mrow></msub><msup><mi>e</mi><mrow><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>−</mo><mi>m</mi></mrow></msup><mo>,</mo></math><math display="block"><mi>O</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><msub><mi>O</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub></mrow></mfrac></math></div><p>单一 Task 覆盖整个请求时，可以直接写最终输出。多 Task 路径在完成 Partial 发布后，通过带获取/释放语义的原子计数选择最后完成者，归约结束时完成该轮计数复位。这把分片数量、Scratch 位置和归约生命周期统一在请求身份下。</p></div>
-      <details class="experiment" id="decode-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、模型结果与 HTTP 吞吐</strong><small>均匀 / 偏斜工作负载 · 完整 Decode Step · 服务入口</small></span></summary><div class="experiment-body prose">
-        <div class="config-grid"><div><small>设备 / 并行</small><strong>4 × RTX 5090 · TP4</strong></div><div><small>Attention 形状 / Rank</small><strong>Q6 / KV1 / D256 · Page32</strong></div><div><small>模型测试</small><strong>256 输出 Token / 请求</strong></div><div><small>统计窗口</small><strong>17–240 · 三轮中位数</strong></div></div>
-        <p>模型测试先执行四轮预热，再进行三次计时。Step 计时覆盖模型执行、通信、LM Head 与采样；B9 使用 16 行 padded Graph。严重偏斜场景由一个 128K 长请求配上 8 个或 31 个 4K 短请求组成。</p>
-        <div class="table-wrap"><table><thead><tr><th>初始上下文</th><th>Native ms</th><th>Bucket ms</th><th>延迟降低</th></tr></thead><tbody><tr><td>B1 · 512</td><td>10.0577</td><td>9.7397</td><td>3.16%</td></tr><tr><td>32 × 8K</td><td>17.9077</td><td>17.9361</td><td>−0.16%</td></tr><tr><td>128K + 8 × 4K</td><td>20.0353</td><td>14.3697</td><td>28.28%</td></tr><tr><td>128K + 31 × 4K</td><td>28.6256</td><td>18.1637</td><td>36.55%</td></tr></tbody></table></div>
-        <h4>服务层：同一批请求经过真实队列</h4><p>独立的 Native / Bucket HTTP 对照使用官方 <code>vllm serve</code> 和 <code>vllm bench serve</code>，覆盖六种请求分布，两轮正式测试反转执行顺序。每个 Profile 完成 540 个请求，混合到达负载的输出吞吐提升为 10.41%–11.36%，均匀负载为 0.03%–0.07%。</p><p>服务层的收益还取决于请求入队、Prefill 和 Decode 的组合。Bucket 针对的长短失衡，在模型 Step 中最容易直接观察；通过 Continuous Batching，这份收益进一步进入真实请求的执行过程。</p>
+      <p>任务表的地址在 CUDA Graph 捕获前就已固定。每次模型前向计算时，Assign 只更新表内内容；各注意力层绑定自己的 Q、KV 和输出张量，再按同一张表执行。因此，请求长度变化时，只需更新这份小表，就能调整各 CTA 的工作量。</p>
+      <h3>每个子任务写出局部结果，最后完成的 CTA 负责合并</h3><p>每个子任务只处理请求的一段 KV。对每个 Q 头，它写出归一化后的局部输出 <i>O<sub>i</sub></i>、局部最大值 <i>m<sub>i</sub></i> 和指数和 <i>l<sub>i</sub></i>。这些数据按子任务编号保存在全局内存的临时缓冲区中。本项目的 TP4 配置下，每份局部输出的有效尺寸为 <i>6 × 256</i>。</p><p>子任务写完局部结果后，更新所属请求的完成计数器。该请求最后一个子任务所在的 CTA 负责读取全部局部结果、完成归约，并直接写出最终输出。这就是 Last-CTA Merge：复用 XQA 的内核内归约逻辑，在同一次 Compute 内核调用里完成分片计算与合并。<a class="ref" href="#ref-7">[7]</a></p></div>
+      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">图 07 / LAST-CTA MERGE</div><h4>最后完成的 CTA 合并这个请求的结果</h4></div></div><div class="stepper" id="merge-steps" role="group" aria-label="选择子任务完成阶段"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div></figure>
+      <div class="prose"><p>合并时，先取所有局部最大值中的最大值 <i>m</i>，以它为共同基准计算各分片的 softmax 权重，再对局部输出加权平均。</p><div class="equation"><math display="block"><mi>m</mi><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>,</mo></math><math display="block"><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo><msub><mi>l</mi><mrow><mi>i</mi></mrow></msub><msup><mi>e</mi><mrow><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>−</mo><mi>m</mi></mrow></msup><mo>,</mo></math><math display="block"><mi>O</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><msub><mi>O</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub></mrow></mfrac></math></div><p>如果一个子任务就能覆盖整个请求，就直接写出最终输出。有多个子任务时，写入局部结果后，通过带获取/释放语义的原子计数确定最后完成者；归约完成后，再复位本轮计数器。分片数、临时缓冲区位置和完成状态都按请求记录。</p></div>
+      <details class="experiment" id="decode-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、模型延迟与 HTTP 吞吐</strong><small>等长与长短混合请求 · 完整解码步 · HTTP 服务</small></span></summary><div class="experiment-body prose">
+        <div class="config-grid"><div><small>设备 / 并行方式</small><strong>4 × RTX 5090 · TP4</strong></div><div><small>每张卡的注意力形状</small><strong>Q6 / KV1 / D256 · Page32</strong></div><div><small>每个请求的输出长度</small><strong>256 token</strong></div><div><small>计时窗口</small><strong>17–240 · 三轮中位数</strong></div></div>
+        <p>模型测试先预热四轮，再计时三轮，取中位数。单步计时包含模型执行、通信、LM Head 和采样。B9 使用补齐到 16 行的 CUDA Graph；两组长短混合负载分别由一个 128K 请求和 8 个或 31 个 4K 请求组成。</p>
+        <div class="table-wrap"><table><thead><tr><th>初始上下文</th><th>原生（ms）</th><th>分桶（ms）</th><th>延迟降低</th></tr></thead><tbody><tr><td>B1 · 512</td><td>10.0577</td><td>9.7397</td><td>3.16%</td></tr><tr><td>32 × 8K</td><td>17.9077</td><td>17.9361</td><td>−0.16%</td></tr><tr><td>128K + 8 × 4K</td><td>20.0353</td><td>14.3697</td><td>28.28%</td></tr><tr><td>128K + 31 × 4K</td><td>28.6256</td><td>18.1637</td><td>36.55%</td></tr></tbody></table></div>
+        <h4>HTTP 服务：计入排队、预填充和解码</h4><p>Native 与 Bucket 的独立 HTTP 对照使用官方 <code>vllm serve</code> 和 <code>vllm bench serve</code>，覆盖六种请求分布，两轮正式测试采用相反的执行顺序。每套配置完成 540 个请求。混合到达负载的输出吞吐提升 10.41%–11.36%，等长负载提升 0.03%–0.07%。</p><p>完整服务还包含排队和预填充，收益幅度与单步解码不同。在连续批处理（Continuous Batching）中，长短请求会进入同一批次；分桶缓解了其中的工作量失衡，也改善了这组混合请求的服务吞吐。</p>
         <p class="source-line">数据：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/decode.csv" target="_blank" rel="noopener">decode.csv ↗</a>　算法：<a href="#ref-7">XQA Bucket [7]</a>　来源：<a href="#ref-3">Tencent HPC-Ops [3]</a></p>
       </div></details>
     </div></details>
   </section>
 
   <section class="chapter" id="fusion">
-    <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">KERNEL FUSION / PRODUCER → CONSUMER</div><h2>让上游直接产出下游要的数据</h2></div></div>
-    <div class="prose"><p>调度让计算资源更忙，算子融合则缩短数据到达下一步的路径。在低精度推理里，GEMM 和 Attention 对输入布局、量化值与 Scale 有明确要求。把这些格式直接放进上游的写回阶段，可以同时省下中间 Tensor 的显存往返和独立处理边界。</p><p>Blackwell 的每个 SM 有四个执行分区，各有自己的 warp 调度器、寄存器和执行单元，四个分区共用 L1 缓存与共享内存的片上容量。拆成两个 kernel 时，生产者先写回全局内存，消费者再读入，重读可能命中 L2。融合之后，消费者可以就地使用寄存器中的值。<a class="ref" href="#ref-16">[16]</a></p></div>
-    <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> Residual + RMSNorm + NVFP4 打包</h3><p>MLP 之前，先把输入与 Residual 相加，再做 Gemma RMSNorm，最后量化成 NVFP4。常规路径会物化一个归一化后的 BF16 Tensor，随后量化 Kernel 再读入它。融合后，归一化结果在寄存器中完成 BF16 舍入，直接生成 FP4 数据与原生布局的 Scale；更新后的 Residual 仍以 BF16 写出。<a class="ref" href="#ref-10">[10]</a></p></div>
-    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">FIG. 08 / MLP INPUT</div><h4>保留 Residual，直接交付 NVFP4</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 Norm 融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 Norm 数据流阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>这个 Kernel 以一行 Hidden 为单位执行，把行归约、分组量化与 Scale 写入组合起来。Hidden Width 为 5120，每 16 个元素组成一个 NVFP4 量化组；Scale 按下游 GEMM 使用的 Swizzle 布局直接写回。</p></div>
-    <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK Norm + RoPE + KV 写入</h3><p>Attention 的入口也有相似的机会。Q 和 K 经过归一化与旋转位置编码；V 沿量化写入路径前进。融合 Kernel 从 QKV 投影输出出发，直接生成 BF16 Q 与 Gate，同时根据 Slot Mapping 把 NVFP4 K/V 及 Scale 写入分页 Cache。<a class="ref" href="#ref-11">[11]</a></p></div>
-    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">FIG. 09 / ATTENTION INPUT</div><h4>Q 送入 Attention，K/V 直接落入 Page</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 QK 融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 QK 数据流阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>这里最重要的是写回目的地：Q 对接 Attention 的输入，K/V 对接已经分配好的 Cache Page。原生 Cache 的分页方式、字节步长和量化 Scale 约定被完整保留，下游 XQA 继续读取同一套数据结构。</p></div>
-    <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> Attention 输出 + Gate + FP8 量化</h3><p>Attention 得到最终结果后，还要乘上 <code>sigmoid(gate)</code>，再量化成输出投影需要的 FP8。我们把这段处理放进最终输出的 Epilogue：在完成 Attention 的归一化与分片归约之后，直接执行 Gate 与 FP8 打包。<a class="ref" href="#ref-12">[12]</a></p></div>
-    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">FIG. 10 / ATTENTION OUTPUT</div><h4>从最终 Attention 结果直接走到输出投影</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 Attention Tail 路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 Tail 数据流阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>单 Task 路径在直接输出时执行这个 Epilogue；多 Task 路径由 Last-CTA Merge 的最终写出者执行。这样，每个请求的最终输出经过一次 Gate 与量化，分片内部仍沿用原来的 Softmax 合并结构。</p></div>
-    <div class="prose" id="fusion-results"><h3>算子级的节省，进入完整 Decode 调用</h3><p>直接算子测试中，Residual / Norm / NVFP4 的耗时降低约 <strong>33%–39%</strong>，QK / RoPE / KV 写入降低约 <strong>52%–55%</strong>；Attention Tail 在完整 XQA 尾部的收益约为 <strong>0.7%–1.3%</strong>。三项融合一起启用，在 B1/8/16/32、1K/2K 上下文的完整 GPU Decode 调用中，相对相同 Bucket 路径降低 <strong>2.04%–7.18%</strong>。<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FUSION</div><h4>从单个算子到完整解码步的延迟收益</h4></div></div><div class="fusion-result-grid"><div><small>直接 Producer</small><strong class="metric-range">33<span class="dash">–</span>39<span class="unit">%</span></strong><span>Residual / RMSNorm / NVFP4</span></div><div><small>直接 Producer</small><strong class="metric-range">52<span class="dash">–</span>55<span class="unit">%</span></strong><span>QK Norm / RoPE / KV Append</span></div><div><small>完整 XQA Tail</small><strong class="metric-range">0.7<span class="dash">–</span>1.3<span class="unit">%</span></strong><span>Final Output / Gate / FP8</span></div><div class="result-highlight"><small>完整 GPU Decode · 含 LM Head</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>三项融合 / 相同 Bucket 路径</span></div></div></figure>
-    <details class="deep-dive" id="fusion-implementation"><summary><span class="detail-icon">＋</span><span><strong>展开实现：把数值格式写在数据流里</strong><small>BF16 边界 · NVFP4 分组 Scale · 静态 FP8 · 完整服务测试</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
-      <div class="prose"><h3>融合的接口，就是消费者的数据格式</h3><p>三个 Kernel 都沿用现有消费者的输入约定。NormPack 输出 NVFP4 数据和 Swizzled Scale；Front 输出 BF16 Q、BF16 Gate 以及分页的 NVFP4 K/V；Tail 输出静态 Scale 对应的 E4M3 FP8。归一化和 Softmax 的关键归约使用 FP32，原有 BF16 舍入边界在寄存器内保留。</p>
-      <div class="code-block"><div class="code-heading">三个融合边界 / 伪代码</div><pre><code># ① Residual / Gemma RMSNorm / NVFP4
+    <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">算子融合 / 直接生成下游输入</div><h2>算子融合：减少中间结果读写</h2></div></div>
+    <div class="prose"><p>前两章解决的是工作如何分配，接下来要减少计算过程中的数据搬运。低精度 GEMM 和注意力内核要求输入采用特定的量化格式、缩放因子和内存布局。如果上一个内核写出结果时就完成这些转换，就能省掉中间张量的写回、重读，以及单独的内核调用。</p><p>Blackwell 的每个 SM 有四个执行分区，各有自己的 warp 调度器、寄存器和执行单元，共用 SM 内的 L1 缓存与共享内存容量。两个内核分别执行时，上一个内核要先将结果写入全局内存，下一个内核再读取，读取时可能命中 L2。融合后，后续计算可以直接使用还在寄存器中的值。<a class="ref" href="#ref-16">[16]</a></p></div>
+    <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> 残差相加 + RMSNorm + NVFP4 量化</h3><p>进入 MLP 前，要先把输入与残差相加，执行 Gemma RMSNorm，再量化为 NVFP4。原生路径先将归一化结果存成 BF16 张量，量化内核再将它读回。融合内核在寄存器中完成归一化和 BF16 舍入，随后直接生成 FP4 数据及原生布局的缩放因子；更新后的残差仍以 BF16 写出。<a class="ref" href="#ref-10">[10]</a></p></div>
+    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">图 08 / MLP 输入</div><h4>保留残差输出，直接生成 NVFP4</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择归一化融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择归一化计算阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>内核每次处理隐藏状态的一行，将行归约、分组量化和缩放因子写入放在一起。这里的隐藏维度为 5120，每 16 个元素组成一个 NVFP4 量化组；缩放因子直接按下游 GEMM 所需的 swizzle 布局写出。</p></div>
+    <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK 归一化 + RoPE + KV 写入</h3><p>注意力计算之前，Q 和 K 需要归一化并应用旋转位置编码（RoPE），V 则需要量化后写入缓存。融合内核直接读取 QKV 投影结果，生成 BF16 格式的 Q 和门控张量，同时根据槽位映射（Slot Mapping），将 NVFP4 格式的 K/V 及缩放因子写入分页缓存。<a class="ref" href="#ref-11">[11]</a></p></div>
+    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">图 09 / 注意力输入</div><h4>Q 送入注意力内核，K/V 直接写入缓存页</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 QK 融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 QK 处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>融合内核将两类输出直接写到各自的位置：Q 供注意力内核读取，K/V 进入预先分配好的缓存页。分页方式、字节步长和量化缩放因子的约定均与原生缓存一致，下游 XQA 可以继续读取原有数据结构。</p></div>
+    <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> 注意力输出 + 门控 + FP8 量化</h3><p>注意力计算的最终结果还要乘上 <code>sigmoid(gate)</code>，再量化为输出投影所需的 FP8。我们把门控与量化放进注意力内核最终写出结果的阶段（Epilogue）：完成归一化与分片归约后，直接生成 FP8 输出。<a class="ref" href="#ref-12">[12]</a></p></div>
+    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">图 10 / 注意力输出</div><h4>最终结果直接量化，供输出投影使用</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择注意力输出路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择注意力输出处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>只有一个子任务时，直接在写出结果前执行门控和量化；有多个子任务时，则由 Last-CTA Merge 中负责最终归约的 CTA 执行。这样，每个请求都只在得到最终结果后做一次门控与量化，各分片的 softmax 计算和合并方式保持一致。</p></div>
+    <div class="prose" id="fusion-results"><h3>单个算子省下的时间，能带来多少整步收益</h3><p>在独立算子测试中，残差 / RMSNorm / NVFP4 融合使耗时降低约 <strong>33%–39%</strong>，QK 归一化 / RoPE / KV 写入融合降低约 <strong>52%–55%</strong>；注意力输出融合在完整 XQA 尾部测试中降低约 <strong>0.7%–1.3%</strong>。同时启用三项融合后，在批量为 1、8、16、32，上下文为 1K、2K 的测试中，完整 GPU 解码调用的耗时比未融合的同一 Bucket 路径降低 <strong>2.04%–7.18%</strong>。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 算子融合</div><h4>从单个算子到完整解码步的延迟收益</h4></div></div><div class="fusion-result-grid"><div><small>独立算子测试</small><strong class="metric-range">33<span class="dash">–</span>39<span class="unit">%</span></strong><span>残差 / RMSNorm / NVFP4</span></div><div><small>独立算子测试</small><strong class="metric-range">52<span class="dash">–</span>55<span class="unit">%</span></strong><span>QK 归一化 / RoPE / KV 写入</span></div><div><small>完整 XQA 尾部测试</small><strong class="metric-range">0.7<span class="dash">–</span>1.3<span class="unit">%</span></strong><span>最终输出 / 门控 / FP8</span></div><div class="result-highlight"><small>完整 GPU 解码 · 含 LM Head</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>三项融合 / 相同 Bucket 路径</span></div></div></figure>
+    <details class="deep-dive" id="fusion-implementation"><summary><span class="detail-icon">＋</span><span><strong>实现细节：数据布局、舍入位置与模型接入</strong><small>BF16 舍入 · NVFP4 分组缩放 · 静态 FP8 · HTTP 服务测试</small></span><span class="detail-badge">实现</span></summary><div class="details-body">
+      <div class="prose"><h3>三个融合算子各自写出什么格式？</h3><p>三个内核的输出都匹配原有下游接口。NormPack 生成 NVFP4 数据和 swizzle 布局的缩放因子；Front 生成 BF16 Q、BF16 门控张量，以及分页存储的 NVFP4 K/V；Tail 使用静态缩放因子生成 E4M3 FP8。归一化和 softmax 中的关键归约仍使用 FP32，原有流程中转为 BF16 的位置也保持不变，只是在寄存器中完成舍入。</p>
+      <div class="code-block"><div class="code-heading">三项融合的计算流程 / 伪代码</div><pre><code># ① Residual / Gemma RMSNorm / NVFP4
 h = fp32(x) + fp32(residual)
 residual_out = bf16(h)
 y = bf16(h * rsqrt(mean(h * h) + eps) * (fp32(gamma) + 1))
@@ -3260,33 +3260,33 @@ o = bf16(final_attention_output)
 g = bf16(sigmoid(fp32(gate)))
 gated = bf16(fp32(o) * fp32(g))
 write_fp8_e4m3(gated / static_scale)</code></pre></div>
-      <p>Fusion Profile 在模型初始化时安装对应的执行与编译 Hook，沿用已有 Bucket Graph 和原生投影。数据布局在 Kernel 边界上匹配好，模型 Forward 就能把这些 Producer 接到原有 Consumer 上。</p></div>
+      <p>启用 Fusion 配置后，模型初始化时会注册相应的执行与编译 Hook，复用已有的 Bucket CUDA Graph 和原生投影算子。融合内核直接生成下游要求的数据布局，因此可以接入原有的模型前向计算流程。</p></div>
       <details class="experiment" id="fusion-experiment"><summary><span class="detail-icon">＋</span><span><strong>三组 HTTP 对照与完整配置</strong><small>Native / Bucket / Bucket + Fusion · 六种请求负载</small></span></summary><div class="experiment-body prose">
-        <p>服务测试运行三个独立 Profile，每个 Profile 使用相同的请求序列，完成 180 个 预热请求与 360 个正式请求。两轮正式顺序互为反转，输出吞吐按正式输出 Token 总数除以 总耗时计算。</p>
-        <div class="config-grid"><div><small>并行 / KV 预算</small><strong>TP4 · 每 Rank 8 GiB</strong></div><div><small>上下文 / 并发上限</small><strong>128K · 32 请求</strong></div><div><small>Token 预算</small><strong>2048 / batch</strong></div><div><small>编译区间</small><strong>[32, 2048]</strong></div></div>
-        <div class="table-wrap"><table><thead><tr><th>工作负载</th><th>Native tok/s</th><th>Bucket tok/s</th><th>+ Fusion tok/s</th><th>融合增量</th></tr></thead><tbody><tr><td>单个短请求</td><td>92.64</td><td>99.00</td><td>100.74</td><td>+1.76%</td></tr><tr><td>32 个等长请求</td><td>332.85</td><td>332.53</td><td>327.68</td><td>−1.46%</td></tr><tr><td>16 个长短请求</td><td>248.03</td><td>255.70</td><td>252.99</td><td>−1.06%</td></tr><tr><td>32 个长短请求</td><td>226.56</td><td>243.97</td><td>241.84</td><td>−0.87%</td></tr><tr><td>Mixed · 2 req/s</td><td>448.19</td><td>494.11</td><td>495.77</td><td>+0.33%</td></tr><tr><td>Mixed · 8 req/s</td><td>452.48</td><td>496.57</td><td>497.74</td><td>+0.24%</td></tr></tbody></table></div>
-        <p>服务层的融合增量分布在 −1.46% 到 +1.76%，混合到达负载保持了 Bucket 带来的主要吞吐收益。这里计入了原生 Prefill、队列调度和完整请求生命周期：算子缩短的是 Forward 中的局部数据路径，HTTP 吞吐则由整条服务链共同决定。把两个观察窗口放在一起，能够看到优化在哪个层次发挥了作用。</p>
+        <p>服务测试分别运行 Native、Bucket、Bucket + Fusion 三套配置，使用相同的请求序列。每套配置先完成 180 个预热请求，再完成 360 个正式请求，两轮正式测试采用相反的配置执行顺序。输出吞吐按正式请求的输出 token 总数除以总耗时计算。</p>
+        <div class="config-grid"><div><small>并行方式 / KV 预算</small><strong>TP4 · 每张卡 8 GiB</strong></div><div><small>上下文 / 并发上限</small><strong>128K · 32 个请求</strong></div><div><small>每批 token 预算</small><strong>2048</strong></div><div><small>编译区间</small><strong>[32, 2048]</strong></div></div>
+        <div class="table-wrap"><table><thead><tr><th>请求负载</th><th>原生（tok/s）</th><th>分桶（tok/s）</th><th>分桶加融合（tok/s）</th><th>融合后吞吐变化</th></tr></thead><tbody><tr><td>单个短请求</td><td>92.64</td><td>99.00</td><td>100.74</td><td>+1.76%</td></tr><tr><td>32 个等长请求</td><td>332.85</td><td>332.53</td><td>327.68</td><td>−1.46%</td></tr><tr><td>16 个长短混合请求</td><td>248.03</td><td>255.70</td><td>252.99</td><td>−1.06%</td></tr><tr><td>32 个长短混合请求</td><td>226.56</td><td>243.97</td><td>241.84</td><td>−0.87%</td></tr><tr><td>混合到达 · 每秒 2 个请求</td><td>448.19</td><td>494.11</td><td>495.77</td><td>+0.33%</td></tr><tr><td>混合到达 · 每秒 8 个请求</td><td>452.48</td><td>496.57</td><td>497.74</td><td>+0.24%</td></tr></tbody></table></div>
+        <p>在分桶基础上再开融合，单个短请求的输出吞吐提高了 1.76%，32 个等长请求则下降了 1.46%。长短请求混合到达时，主要收益来自分桶，融合额外贡献了 0.24% 或 0.33%。这里计时覆盖整个 HTTP 请求，包括排队、预填充和解码。</p>
         <p class="source-line">数据：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/http_fusion.csv" target="_blank" rel="noopener">http_fusion.csv ↗</a>　实现：<a href="#ref-10">NormPack [10]</a> · <a href="#ref-11">Front [11]</a> · <a href="#ref-12">Tail [12]</a></p>
       </div></details>
     </div></details>
   </section>
-  <section class="closing prose" id="closing"><h2>这些优化在哪些请求上见效</h2><p>四个 32K 提示词一起做预填充时，折返流水让耗时从 4.30 秒降到 3.94 秒。解码时，一个长请求混在 31 个短请求里，就能让多数 CTA 提前空闲。把长请求的 KV 分摊给更多 CTA 后，单步耗时从 28.63 毫秒降到 18.16 毫秒。在同一条分桶路径上，算子融合进一步省去了中间结果的写回和重读。在测过的解码形状中，三项融合让完整 GPU 步的延迟又降低了 2.04% 至 7.18%。</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">查看源码、配置与完整 Benchmark <span aria-hidden="true">↗</span></a></section>
-  <section class="references" id="references"><div class="eyebrow">SOURCES & IMPLEMENTATION</div><h2>引用与实现入口</h2><p>图中的成本模型、任务划分与数据通路分别对应正文公式和下列源码。</p>
+  <section class="closing prose" id="closing"><h2>这些优化何时有效</h2><p>四个 32K 请求一起做预填充时，折返流水线把耗时从 4.30 秒降到 3.94 秒。解码时，一个长请求混在 31 个短请求里，会让多数 CTA 先做完，等待少数 CTA 处理剩余的 KV。分桶把长请求的工作分给更多 CTA 后，单步耗时从 28.63 毫秒降到 18.16 毫秒。在同一条分桶路径上，算子融合又省去了中间结果的写回和重读；在 1K 和 2K 上下文、批量为 1、8、16、32 的测试中，完整 GPU 解码步的耗时又降低了 2.04% 至 7.18%。</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">查看源码、配置与完整测试结果 <span aria-hidden="true">↗</span></a></section>
+  <section class="references" id="references"><div class="eyebrow">参考资料 / 实现源码</div><h2>参考资料与源码</h2><p>正文中的成本模型见相应公式；调度方法、数据流和实验结果可在以下论文、文档与源码中查阅。</p>
     <ol class="reference-list">
-      <li id="ref-1"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener">Qwen3.8 SM120: VPP & Bucket Attention <span>↗</span></a><small>项目首页、安装入口与整体架构。</small></li>
-      <li id="ref-2"><a href="https://github.com/RookieCoder-Camera/vllm-ascend/blob/c409752993b80524e4af6b98ef3b69a8f9c13f2c/vllm_ascend/distributed/vpp_utils.py" target="_blank" rel="noopener">VPP 作者实现 · vLLM-Ascend <span>↗</span></a><small>折返式层放置与 Continuation 执行顺序的来源。</small></li>
-      <li id="ref-3"><a href="https://vllm-project.github.io/2026/07/06/vllm-hpc-ops.html" target="_blank" rel="noopener">vLLM × HPC-Ops · Tencent Hunyuan AI Infra Team <span>↗</span></a><small>H20 上的全局 KV 工作分配、Persistent Bucket 与跨层任务计划复用。</small></li>
-      <li id="ref-4"><a href="https://github.com/Dao-AILab/flash-attention/blob/main/hopper/flash_prepare_scheduler.cu" target="_blank" rel="noopener">FlashAttention-3 · Prepare Scheduler <span>↗</span></a><small>根据实际 Q/KV 工作量计算逐请求 Split 数的 Hopper 实现。</small></li>
-      <li id="ref-5"><a href="https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/cute/prepare_scheduler.py" target="_blank" rel="noopener">FlashAttention-4 · Prepare Scheduler <span>↗</span></a><small>CuTe DSL 中的变长元数据与逐请求 Split-KV 规则。</small></li>
-      <li id="ref-6"><a href="https://github.com/flashinfer-ai/flashinfer/tree/0179e5b312d6aa0c790e8e571b9037bb277f4dbd/csrc/xqa" target="_blank" rel="noopener">FlashInfer · XQA <span>↗</span></a><small>NVFP4 KV 加载、Attention 计算、Partial 输出与归约基础。</small></li>
-      <li id="ref-7"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_bucket_xqa.cu" target="_blank" rel="noopener">SM120 Bucket XQA · Assign / Compute <span>↗</span></a><small>256-token Tile、Task/Bucket 表与 Persistent 执行；同目录 xqa_task_impl.cuh 实现 Last-CTA Merge。</small></li>
-      <li id="ref-8"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/docs/results.md" target="_blank" rel="noopener">Performance Results · 配置与数据 <span>↗</span></a><small>Prefill、模型 Decode、直接算子与 HTTP 结果；图表读取仓库 benchmarks/ 中的 CSV。</small></li>
-      <li id="ref-9"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/docs/vpp-resources.md" target="_blank" rel="noopener">VPP Communication · Rank 数据通路 <span>↗</span></a><small>共享 Source/Receive Arena、分段 DMA、跨方向预取和事件生命周期。</small></li>
-      <li id="ref-10"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_norm_pack.cu" target="_blank" rel="noopener">Residual / RMSNorm / NVFP4 Producer <span>↗</span></a><small>Gemma RMSNorm、BF16 Residual 与分组 NVFP4 打包。</small></li>
-      <li id="ref-11"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_attention_front.cu" target="_blank" rel="noopener">QK Norm / RoPE / KV Append <span>↗</span></a><small>Q、K 的归一化和旋转，以及 K/V 分页量化写回。</small></li>
-      <li id="ref-12"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/xqa_task_impl.cuh" target="_blank" rel="noopener">XQA Task Body / Final FP8 Tail <span>↗</span></a><small>Partial 合并与最终写回；配套 nvfp4_bucket_xqa.cu 中的 store_final_fp8。</small></li>
-      <li id="ref-13"><a href="https://arxiv.org/abs/2608.26523" target="_blank" rel="noopener">VPP · arXiv:2608.26523 <span>↗</span></a><small>项目引用的折返式 Virtual Pipeline Parallelism 论文。</small></li>
-      <li id="ref-14"><a href="https://arxiv.org/abs/2603.05451" target="_blank" rel="noopener">FlashAttention-4: Algorithm and Kernel Pipelining Co-Design <span>↗</span></a><small>Attention 的硬件协同、任务调度与 Kernel 流水设计。</small></li>
+      <li id="ref-1"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener">Qwen3.8 SM120: VPP & Bucket Attention <span>↗</span></a><small>项目说明、安装方法与整体架构。</small></li>
+      <li id="ref-2"><a href="https://github.com/RookieCoder-Camera/vllm-ascend/blob/c409752993b80524e4af6b98ef3b69a8f9c13f2c/vllm_ascend/distributed/vpp_utils.py" target="_blank" rel="noopener">VPP 作者实现 · vLLM-Ascend <span>↗</span></a><small>折返式模型层划分，以及批次在各流水级间继续执行的调度顺序。</small></li>
+      <li id="ref-3"><a href="https://vllm-project.github.io/2026/07/06/vllm-hpc-ops.html" target="_blank" rel="noopener">vLLM × HPC-Ops · Tencent Hunyuan AI Infra Team <span>↗</span></a><small>H20 上的全局 KV 分配、CTA 常驻执行，以及任务表的跨层复用。</small></li>
+      <li id="ref-4"><a href="https://github.com/Dao-AILab/flash-attention/blob/main/hopper/flash_prepare_scheduler.cu" target="_blank" rel="noopener">FlashAttention-3 · Prepare Scheduler <span>↗</span></a><small>Hopper 上根据 Q/KV 工作量，为每个请求计算分片数的实现。</small></li>
+      <li id="ref-5"><a href="https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/cute/prepare_scheduler.py" target="_blank" rel="noopener">FlashAttention-4 · Prepare Scheduler <span>↗</span></a><small>CuTe DSL 实现的变长请求信息整理和逐请求 Split-KV 配置。</small></li>
+      <li id="ref-6"><a href="https://github.com/flashinfer-ai/flashinfer/tree/0179e5b312d6aa0c790e8e571b9037bb277f4dbd/csrc/xqa" target="_blank" rel="noopener">FlashInfer · XQA <span>↗</span></a><small>本项目复用的 NVFP4 KV 加载、注意力计算、局部结果输出与归约实现。</small></li>
+      <li id="ref-7"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_bucket_xqa.cu" target="_blank" rel="noopener">SM120 Bucket XQA · Assign / Compute <span>↗</span></a><small>以 256 token 为块构建任务表，由 CTA 逐桶执行；同目录的 xqa_task_impl.cuh 实现 Last-CTA Merge。</small></li>
+      <li id="ref-8"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/docs/results.md" target="_blank" rel="noopener">性能结果 · 配置与数据 <span>↗</span></a><small>预填充、模型解码、独立算子及 HTTP 测试结果。本文图表读取仓库 benchmarks/ 目录中的 CSV 数据。</small></li>
+      <li id="ref-9"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/docs/vpp-resources.md" target="_blank" rel="noopener">VPP 通信 · 单卡数据流 <span>↗</span></a><small>共享收发缓冲区、分段 DMA、跨方向预取，以及事件的创建和回收。</small></li>
+      <li id="ref-10"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_norm_pack.cu" target="_blank" rel="noopener">Residual / RMSNorm / NVFP4 Producer <span>↗</span></a><small>融合残差相加、Gemma RMSNorm 与 NVFP4 分组量化，保留 BF16 残差输出。</small></li>
+      <li id="ref-11"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/nvfp4_attention_front.cu" target="_blank" rel="noopener">QK Norm / RoPE / KV Append <span>↗</span></a><small>Q/K 归一化、RoPE，以及 K/V 量化后的分页缓存写入。</small></li>
+      <li id="ref-12"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/kernels/xqa_task_impl.cuh" target="_blank" rel="noopener">XQA Task Body / Final FP8 Tail <span>↗</span></a><small>局部结果合并与最终输出写回，配合 nvfp4_bucket_xqa.cu 中的 store_final_fp8 完成 FP8 量化。</small></li>
+      <li id="ref-13"><a href="https://arxiv.org/abs/2608.26523" target="_blank" rel="noopener">VPP · arXiv:2608.26523 <span>↗</span></a><small>本项目参考的折返式虚拟流水线并行论文。</small></li>
+      <li id="ref-14"><a href="https://arxiv.org/abs/2603.05451" target="_blank" rel="noopener">FlashAttention-4: Algorithm and Kernel Pipelining Co-Design <span>↗</span></a><small>结合硬件特性设计注意力算法、任务调度与内核流水线。</small></li>
       <li id="ref-15"><a href="https://github.com/Tencent/hpc-ops/blob/2a2e26562433a8ba4b504858f1c938eb7612c901/src/attention/decode/sm90/assign_task.cu" target="_blank" rel="noopener">Tencent HPC-Ops · Assign Task <span>↗</span></a><small>全局 KV 分块与 CTA 任务分配的上游源码。</small></li>
       <li id="ref-16"><a href="https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf" target="_blank" rel="noopener">NVIDIA RTX Blackwell GPU Architecture ↗</a><small>图 5 给出了 SM 的四个执行分区及其共用的片上存储。</small></li>
     </ol>
@@ -3294,35 +3294,35 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   <footer class="site-footer"><div><strong>NICKO / SYSTEMS</strong><span>千问3.8 27B · SM120 · 2026</span></div><a href="#top">回到顶部 ↑</a></footer>
 </main>
 <aside class="toc" id="toc" aria-label="文章目录">
-  <div class="toc-heading">ON THIS PAGE<span id="read-percent">0%</span></div>
+  <div class="toc-heading">本文目录<span id="read-percent">0%</span></div>
   <nav>
-    <a href="#intro" class="toc-main">从三个层次看推理</a>
-    <a href="#prefill" class="toc-chapter"><span>01</span> Prefill · 跨 GPU</a>
-    <a href="#prefill-cost" class="toc-sub">Chunk 为什么越来越贵</a>
+    <a href="#intro" class="toc-main">推理优化的三个层次</a>
+    <a href="#prefill" class="toc-chapter"><span>01</span> 预填充 · 四卡流水线</a>
+    <a href="#prefill-cost" class="toc-sub">后面的块为什么更慢</a>
     <a href="#prefill-fold" class="toc-sub">折返式 VPP</a>
     <a href="#pipeline-figure" class="toc-sub">PP / VPP 时间线</a>
     <a href="#prefill-results" class="toc-sub">长上下文性能</a>
-    <a href="#vpp-implementation" class="toc-sub" data-expand>Rank 内的数据通路</a>
-    <a href="#decode" class="toc-chapter"><span>02</span> Decode · 跨 CTA</a>
-    <a href="#decode-load" class="toc-sub">长短请求的负载差</a>
+    <a href="#vpp-implementation" class="toc-sub" data-expand>单卡内的收发与计算</a>
+    <a href="#decode" class="toc-chapter"><span>02</span> 解码 · 按 KV 长度分工</a>
+    <a href="#decode-load" class="toc-sub">长短请求的工作量差距</a>
     <a href="#split-strategies" class="toc-sub">从 Split-KV 到分桶</a>
-    <a href="#bucket-figure" class="toc-sub">交互：分配与执行</a>
-    <a href="#decode-results" class="toc-sub">模型与服务收益</a>
-    <a href="#decode-implementation" class="toc-sub" data-expand>Partial 与最终归约</a>
-    <a href="#fusion" class="toc-chapter"><span>03</span> Fusion · 跨 Kernel</a>
-    <a href="#fusion-norm" class="toc-sub">Residual / Norm / FP4</a>
+    <a href="#bucket-figure" class="toc-sub">图解：分桶与执行</a>
+    <a href="#decode-results" class="toc-sub">模型延迟与服务吞吐</a>
+    <a href="#decode-implementation" class="toc-sub" data-expand>局部结果与最终归约</a>
+    <a href="#fusion" class="toc-chapter"><span>03</span> 算子融合 · 减少读写</a>
+    <a href="#fusion-norm" class="toc-sub">残差 / RMSNorm / NVFP4</a>
     <a href="#fusion-front" class="toc-sub">QK / RoPE / KV 写入</a>
-    <a href="#fusion-tail" class="toc-sub">Attention / Gate / FP8</a>
-    <a href="#fusion-results" class="toc-sub">从算子到完整调用</a>
-    <a href="#closing" class="toc-main">这些优化在哪些请求上见效</a>
-    <a href="#references" class="toc-main">引用与实现入口</a>
+    <a href="#fusion-tail" class="toc-sub">注意力输出 / 门控 / FP8</a>
+    <a href="#fusion-results" class="toc-sub">算子与整步耗时</a>
+    <a href="#closing" class="toc-main">这些优化何时有效</a>
+    <a href="#references" class="toc-main">参考资料与源码</a>
   </nav>
   <div class="toc-bottom"><span class="dot"></span> SM120 · RTX 5090<br><span class="muted">Qwen3.8 · NVFP4 · vLLM</span></div>
 </aside>
 </div>
 <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 <noscript><div class="noscript">启用 JavaScript 后可使用分步图解；正文、实验结果和引用可直接阅读。</div></noscript>
-<script id="benchmark-data" type="application/json">{"prefill":[{"input_tokens":"8192","requests":"4","cpp_ms":"832.413","vpp_ms":"795.197","vpp_chunk_tokens":"2048","vpp_graph":"piecewise"},{"input_tokens":"32768","requests":"4","cpp_ms":"4304.359","vpp_ms":"3936.227","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"65536","requests":"4","cpp_ms":"11647.508","vpp_ms":"10834.357","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"131071","requests":"4","cpp_ms":"35241.058","vpp_ms":"33410.873","vpp_chunk_tokens":"8192","vpp_graph":"none"}],"decode":[{"batch":"1","context_pattern":"512","native_ms":"10.0577","bucket_ms":"9.7397"},{"batch":"32","context_pattern":"32x8064","native_ms":"17.9077","bucket_ms":"17.9361"},{"batch":"9","context_pattern":"130816+8x4096","native_ms":"20.0353","bucket_ms":"14.3697"},{"batch":"32","context_pattern":"130816+31x4096","native_ms":"28.6256","bucket_ms":"18.1637"}],"http_fusion":[{"bank":"short_c1","native_tokens_per_second":"92.64","bucket_tokens_per_second":"99.00","fused_tokens_per_second":"100.74"},{"bank":"uniform32","native_tokens_per_second":"332.85","bucket_tokens_per_second":"332.53","fused_tokens_per_second":"327.68"},{"bank":"skew16","native_tokens_per_second":"248.03","bucket_tokens_per_second":"255.70","fused_tokens_per_second":"252.99"},{"bank":"skew32","native_tokens_per_second":"226.56","bucket_tokens_per_second":"243.97","fused_tokens_per_second":"241.84"},{"bank":"mixed_2rps","native_tokens_per_second":"448.19","bucket_tokens_per_second":"494.11","fused_tokens_per_second":"495.77"},{"bank":"mixed_8rps","native_tokens_per_second":"452.48","bucket_tokens_per_second":"496.57","fused_tokens_per_second":"497.74"}]}</script><script id="diagram-messages" type="application/json">{"theme.light":"切换浅色模式","theme.dark":"切换深色模式","toc.close":"关闭目录","toc.open":"打开目录","pipe.start":"起点","pipe.fill":"填充","pipe.turn":"折返","pipe.steady":"稳态交错","pipe.drain":"排空","overview":"总览","pipe.all":"\u003coption value=\"-1\">全部\u003c/option>","pipe.finish":"完成时间 {0} u","pipe.tip":"\u003cstrong>{0} · GPU{1} · C{2}\u003c/strong>Stage {3} · {4}\u003cbr>历史：{5}C\u003cbr>开始：{6} u\u003cbr>结束：{7} u\u003cbr>耗时：{8} u","pipe.timeline":"{0}四卡计算时间线","pipe.startNote":"第一份 Chunk 从 GPU0 出发。CPP 一次执行 16 层，VPP 一次执行 8 层；两条路线最终都完成 64 层计算。","pipe.fillNote":"各卡收到输入便开始计算，GPU0 同时继续处理新的 Chunk。VPP 的暖机预算由外向内为 \u003cstrong>7 / 5 / 3 / 1\u003c/strong>，让折返工作逐级接入。","pipe.turnNote":"C0 到达 GPU3，在本地从 S3 进入 S4。更早的 Chunk 开始折返，较新的 Chunk 继续前进；两段工作开始共用各 Rank 的 Compute Stream。","pipe.steadyNote":"同一张 GPU 交错执行较早 Chunk 的 Return 与较新 Chunk 的 Forward。计算粒度减半，后半段的层被提前穿插到前向流水中。","pipe.drainNote":"所有 Chunk 已进入流水。VPP 先前已经推进了部分后半程工作，现在依次完成剩余的 Return；CPP 继续沿物理 Stage 完成最后的长 Chunk。","pipe.uniformNote":"等耗时模型下，两条路线的总完成时间相同。切换到“逐步增长”，观察历史 KV 带来的成本变化怎样影响填排过程。","pipe.growthNote":"当前模型中，CPP 完成于 \u003cstrong>{0} u\u003c/strong>，VPP 完成于 \u003cstrong>{1} u\u003c/strong>。总计算工作相同，差别来自 Stage 粒度与本地执行顺序。","pipe.cppIdle":"CPP 每卡平均空闲","pipe.elapsed":"从开始到全部完成","pipe.vppIdle":"VPP 每卡平均空闲","pipe.equalWork":"相同累计计算量","pipe.delta":"模型完成时间变化","dma.ready":"输出就绪","dma.d2h":"提交 D2H","dma.h2d":"排好 H2D","dma.pipeline":"分段流水","dma.received":"接收完成","dma.release":"消费与回收","dma.outputEvent":"输出事件","dma.wait":"等待事件 → H2D → ACK","dma.diagram":"上游GPU0和下游GPU1分段DMA的事件时间线","dma.free":"可复用","dma.held":"保留 C0 输出","dma.read":"本 Chunk 已读完","dma.cycle":"逐段 H2D 后循环复用","dma.consuming":"Stage 正在消费","dma.writing":"H2D 写入中","dma.waiting":"准备接收","dma.readyNote":"GPU0 的计算先后记录 Residual / Hidden 的 Plane-ready Event。主机代理线程按就绪事件准备对应的数据段。","dma.d2hNote":"GPU0 的 CPU 把一个 Segment 的 D2H 和完成 Event 排入发送流，然后发布 READY。READY 把这一代事件的身份交给接收端。","dma.h2dNote":"GPU1 提前排好 \u003cstrong>Wait(D2H Event) → H2D → H2D Event\u003c/strong>，随后发布 ACK。Copy Engine 在 D2H 的事件满足后自动开始 H2D，命令提交与实际搬运由这条依赖衔接。","dma.pipelineNote":"一段 D2H 与前一段 H2D 交错推进。8 个 Host Segment 循环承接整份 160 MiB 数据；复用某个 Ring 位置前，发送端确认对应 ACK 和 H2D 完成事件。","dma.receivedNote":"完整输入到达 GPU1，Compute Stream 越过接收 Event 开始 S1(C0)。GPU0 的 Source 已随 D2H 完成归还，Host Ring 也已完成这一份数据的传递。","dma.releaseNote":"GPU1 完成 S1(C0) 的输入消费后，Consumer Event 归还 Receive Slot。Source、Host Segment、Receive 各按自己的最后一次读取时间释放。","load.native":"原生统一 Split","load.active":"有效 CTA {0} / 170","load.tasks":"\u003cbr>{0} 个 Task","load.diagram":"原生Split和Bucket在170个CTA上的KV工作量","load.nativeMax":"原生最重 CTA","load.bucketMax":"Bucket 最重 CTA","load.batch":"整个 Batch","load.counts":"{0} Task · {1} 有效 Bucket","load.uniformStart":"均匀上下文下，原生分配已经接近等重；两种方法的最重 CTA 都是 \u003cstrong>","load.uniformEnd":" 个 Tile\u003c/strong>。任务组织的选择可以跟随这份几何信息。","load.skewNote":"长请求在原生划分中集中于少量 Split，最重 CTA 处理 \u003cstrong>{0} 个 Tile\u003c/strong>。全局 Bucket 用每份 \u003cstrong>{1} 个 Tile\u003c/strong> 的预算重新组织工作，跨请求边界建立新的 Task。","bucket.requests":"请求","bucket.pack":"生成 Bucket","bucket.run":"CTA 执行","bucket.partials":"Partial 输出","bucket.cost":"KV 长度决定工作量","bucket.tileSize":"每个小块 = 256 个 KV Token","bucket.summary":"总工作量 {0} Tiles · CTA 预算 {1} · 每 Bucket {2} Tiles","bucket.skew":"B32：一个长请求，31 个短请求","bucket.tileAxis":"把 KV 工作展开为全局 Tile 轴","bucket.budgetTitle":"统一工作预算","bucket.budgetCalc":"{0} / 170 → 每 Bucket {1} Tiles","bucket.identity":"保留请求身份","bucket.boundary":"跨请求边界时建立新的 Task","bucket.example":"8 个 Bucket，9 个 Task","bucket.select":"170 个 Bucket · 点击一个 CTA 查看其 Task","bucket.empty":"空 Bucket","bucket.ctaPath":"一个 CTA 在一次 Launch 内顺序执行自己的 Task","bucket.order":"CTA {0} 的执行顺序","bucket.inside":"每个 Task 内部：","bucket.readQ":"加载本请求 Q","bucket.readTiles":"遍历自己的 KV Tile 区间","bucket.softmax":"持续更新 Online Softmax","bucket.write":"写出该 Task 的 Partial","bucket.max":"170 CTA / 工作量上限 6 Tiles","bucket.sequence":"CTA {0} 依次执行","bucket.mergeTitle":"Partial 以 Task 为单位，按 Request 合并","bucket.taskCount":"{0} 个 Task","bucket.byRequest":"按请求归约","bucket.other":"其余请求沿相同的 Partial → Merge 路径得到各自输出。","bucket.diagram":"KV Tile到Task与Bucket的手动分步图","bucket.total":"总 KV 工作","bucket.reqCount":"{0} 个请求","bucket.budget":"Bucket 预算","bucket.active":"{0} 个有效 CTA","bucket.slots":"Task / Partial 槽位","bucket.count":"{0} 个 Bucket","bucket.requestsNote":"先读取当前 Batch 的 KV 长度。每个请求保持自己的 Q、KV Page Table 和最终输出位置。","bucket.tilesNote":"按 256 Token 统计 Tile 数，再计算全局前缀位置。每个 Tile 都携带 Request 身份，KV 数据继续保留在原有分页 Cache 中。","bucket.packNote":"每个 Bucket 预算为 \u003cstrong>{0} 个 Tile\u003c/strong>。当前 CTA {1} 包含 \u003cstrong>{2} 个 Task\u003c/strong>{3}","bucket.cross":"，因为这一份预算跨过了 Request 边界。","bucket.same":"，这一份工作落在同一个请求内。","bucket.runNote":"一个 CTA 读取自己的 Bucket，依次执行其中的 Task。Task 内的多个 Tile 共享一次 Online Softmax 累加过程，Task 结束才发布一份 Partial。","bucket.mergeNote":"同一请求的 Partial 通过请求级计数器汇合。最后完成的 Task 所在 CTA 读入该请求的所有 Partial，得到最终 O；单 Task 请求直接写最终结果。","bucket.table":"\u003ctable>\u003cthead>\u003ctr>\u003cth>Task\u003c/th>\u003cth>Request\u003c/th>\u003cth>KV Tile 范围\u003c/th>\u003cth>数量\u003c/th>\u003cth>Bucket / CTA\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>","merge.start":"开始","merge.t2":"T2 完成","merge.t0":"T0 完成","merge.t4":"T4 完成","merge.t3":"T3 完成","merge.tasks":"计算 Task","merge.done":"完成","merge.running":"计算","merge.wait":"等待 Partial","merge.counter":"完成计数","merge.winner":"取得 Merge 职责","merge.output":"6 × 256 / 最终输出","merge.pending":"等待归约","merge.reweight":"读取 5 份 Partial → Softmax 重加权","merge.order":"完成顺序：T2 → T0 → T4 → T3 → T1","merge.reset":"写出结果，本轮计数复位","merge.publish":"每个完成者只发布自己的 Partial","merge.diagram":"五个Task按完成顺序发布Partial并由最后完成者归约","merge.startNote":"R0 被拆成五份 Task。它们在不同 CTA 上推进，Scratch 为每份 Task 保留独立位置。","merge.t2Note":"T2 先完成，写出自己的 O₂、m₂、l₂，并更新 R0 的完成计数。","merge.t0Note":"T0 完成后，Scratch 中已有两份 Partial。其余 Task 继续推进。","merge.t4Note":"T4 已经完成，接下来仍等待 T3 和 T1；归约职责由实际完成顺序决定。","merge.t3Note":"四份 Partial 已就绪。T1 所在 CTA 正在完成最后一份工作。","merge.t1Note":"T1 的计数更新读到上一值 4，取得最后完成者身份。它读取五份 Partial，按 Softmax 质量重加权，直接写出 O_R0。","fusion.readInput":"读取输入","fusion.normQuant":"归一化与量化","fusion.gemm":"交付 GEMM","fusion.readProj":"读取投影","fusion.qkv":"QK 与 KV 处理","fusion.store":"写入消费者","fusion.final":"最终 Attention","fusion.gateQuant":"Gate 与量化","fusion.project":"交付投影","fusion.fused":"融合","fusion.native":"原生","norm.inputNote":"读取 x、Residual 与归一化权重。一行 5120 个元素在 CTA 内完成 Residual 相加和平方和归约。","norm.fusedNote":"每个 warp 用 shuffle 归约平方和，10 个 FP32 部分和汇入共享内存，由 warp 0 算出 RMS 的倒数。随后每个线程将 16 个归一化结果舍入到 BF16，再量化打包，共用一个 E4M3 scale。","norm.nativeNote":"Add / RMSNorm 产生 BF16 y，随后量化操作从这个中间 Tensor 读入数值并打包 NVFP4。","norm.outNote":"一次写回同时交付 \u003cstrong>BF16 Residual、Packed FP4 和原生布局的 Scale\u003c/strong>。MLP GEMM 直接消费量化输入。","norm.unfusedOut":"BF16 Residual 保留；独立的量化阶段交付 Packed FP4 与 Scale，供 MLP GEMM 读取。","front.inputNote":"读取 QKV Projection 的输出，以及位置、Slot Mapping 和量化 Scale。Q 侧同时携带后续门控需要的 Gate。","front.fusedNote":"每个 128 线程的 CTA 负责一个 token 的一个 Q 或 K head，4 个 warp 通过共享内存合并平方和。K 旋转后的值直接进入 FP4 打包逻辑。V 从投影输出中读出，量化后写入同一缓存 slot。","front.nativeNote":"Q / K 的变换先生成对应数据；KV 量化与分页 Append 在下一处理边界消费 K、V。","front.outNote":"最终交付 \u003cstrong>BF16 Q + Gate\u003c/strong>，以及分页 Cache 中的 \u003cstrong>NVFP4 K/V + Scale\u003c/strong>。Attention 读取既有 Page Table 与原生数据布局。","tail.inputNote":"单 Task 直接得到 O，多 Task 在 Last-CTA Merge 后得到 O；这一阶段已经完成整个请求 KV 范围的 Softmax 归约。","tail.fusedNote":"最终写出者依次执行 BF16 sigmoid(gate)、BF16 乘法和静态 FP8 量化，直接生成投影的输入格式。","tail.nativeNote":"Attention 写出 BF16 O，原生编译尾处理读取它，完成 Gate 乘法与 FP8 量化。","tail.outNote":"输出直接以 \u003cstrong>E4M3 FP8\u003c/strong> 写回，接入 Output Projection。Partial 的计算与合并继续沿用原来的数据格式。","tail.unfusedOut":"FP8 Tensor 由尾处理阶段写出，再进入 Output Projection。","chart.prefillRow":"\u003cdiv class=\"bench-row\">\u003cdiv class=\"bench-row-title\">\u003cspan>{0} 输入 / 请求\u003c/span>\u003cspan class=\"bench-gain\">−{1}%\u003c/span>\u003c/div>{2}{3}\u003c/div>","chart.uniform":"32 × 8K","load.splits":"每行 {0} 个分片","load.budget":"每桶目标为 {0} 个 tile"}</script>
+<script id="benchmark-data" type="application/json">{"prefill":[{"input_tokens":"8192","requests":"4","cpp_ms":"832.413","vpp_ms":"795.197","vpp_chunk_tokens":"2048","vpp_graph":"piecewise"},{"input_tokens":"32768","requests":"4","cpp_ms":"4304.359","vpp_ms":"3936.227","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"65536","requests":"4","cpp_ms":"11647.508","vpp_ms":"10834.357","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"131071","requests":"4","cpp_ms":"35241.058","vpp_ms":"33410.873","vpp_chunk_tokens":"8192","vpp_graph":"none"}],"decode":[{"batch":"1","context_pattern":"512","native_ms":"10.0577","bucket_ms":"9.7397"},{"batch":"32","context_pattern":"32x8064","native_ms":"17.9077","bucket_ms":"17.9361"},{"batch":"9","context_pattern":"130816+8x4096","native_ms":"20.0353","bucket_ms":"14.3697"},{"batch":"32","context_pattern":"130816+31x4096","native_ms":"28.6256","bucket_ms":"18.1637"}],"http_fusion":[{"bank":"short_c1","native_tokens_per_second":"92.64","bucket_tokens_per_second":"99.00","fused_tokens_per_second":"100.74"},{"bank":"uniform32","native_tokens_per_second":"332.85","bucket_tokens_per_second":"332.53","fused_tokens_per_second":"327.68"},{"bank":"skew16","native_tokens_per_second":"248.03","bucket_tokens_per_second":"255.70","fused_tokens_per_second":"252.99"},{"bank":"skew32","native_tokens_per_second":"226.56","bucket_tokens_per_second":"243.97","fused_tokens_per_second":"241.84"},{"bank":"mixed_2rps","native_tokens_per_second":"448.19","bucket_tokens_per_second":"494.11","fused_tokens_per_second":"495.77"},{"bank":"mixed_8rps","native_tokens_per_second":"452.48","bucket_tokens_per_second":"496.57","fused_tokens_per_second":"497.74"}]}</script><script id="diagram-messages" type="application/json">{"theme.light":"切换浅色模式","theme.dark":"切换深色模式","toc.close":"关闭目录","toc.open":"打开目录","pipe.start":"首块进入","pipe.fill":"填满流水线","pipe.turn":"折返","pipe.steady":"去回程交错","pipe.drain":"排空","overview":"总览","pipe.all":"\u003coption value=\"-1\">全部\u003c/option>","pipe.finish":"总耗时 {0} u","pipe.tip":"\u003cstrong>{0} · GPU{1} · C{2}\u003c/strong>流水级 S{3} · {4}\u003cbr>历史长度：{5}C\u003cbr>开始：{6} u\u003cbr>结束：{7} u\u003cbr>耗时：{8} u","pipe.timeline":"{0}四卡计算时间线","pipe.startNote":"GPU0 开始处理第一块。CPP 一次算 16 层，VPP 一次算 8 层。两种排程都要把这一块的 64 层算完。","pipe.fillNote":"GPU0 继续接收新块，后面的卡一拿到输入就开始算。GPU0 到 GPU3 分别先处理 \u003cstrong>7、5、3、1\u003c/strong> 个去程块，再接回程块。","pipe.turnNote":"第一个块 C0 在 GPU3 上算完 S3，接着算 S4，开始回程。这时，新块仍从 GPU0 向 GPU3 推进。","pipe.steadyNote":"每张卡轮流做两件事：算旧块在回程的 8 层，再算新块在去程的 8 层。","pipe.drainNote":"所有块都已进入流水线。VPP 只需算完剩余的回程块。CPP 中，最后一个块还要逐卡经过后面的流水级。","pipe.uniformNote":"当各块耗时相同时，两种排程的总耗时也相同。把“每块耗时”切到“逐步增长”，可以看到后面的卡要多等多久。","pipe.growthNote":"同样的计算量，CPP 用了 \u003cstrong>{0} u\u003c/strong>，VPP 用了 \u003cstrong>{1} u\u003c/strong>。图中以 CPP 第一级处理首块的时间为一个单位（u）。","pipe.cppIdle":"CPP 每卡平均空闲时间","pipe.elapsed":"从第一块开始到最后一块结束","pipe.vppIdle":"VPP 每卡平均空闲时间","pipe.equalWork":"两种排程的总计算量相同","pipe.delta":"VPP 总耗时降幅","dma.ready":"输出就绪","dma.d2h":"提交 D2H","dma.h2d":"提交 H2D","dma.pipeline":"分段流水","dma.received":"接收完成","dma.release":"回收缓冲槽","dma.outputEvent":"输出事件","dma.wait":"等待事件 → H2D → ACK","dma.diagram":"GPU0 经主机缓冲区向 GPU1 传输数据的时间线","dma.free":"可复用","dma.held":"存放 C0 的输出","dma.read":"本块数据已读完","dma.cycle":"每段传完即可复用","dma.consuming":"计算流正在读取","dma.writing":"H2D 写入中","dma.waiting":"准备接收","dma.readyNote":"GPU0 分别记录残差和隐藏状态的就绪事件。每份输出算好后，主机代理线程就能安排相应的数据段传输。","dma.d2hNote":"GPU0 的代理线程把一段数据的 D2H 拷贝和完成事件排入发送流，并发出 READY，告诉接收端这一次该等哪个事件。","dma.h2dNote":"GPU1 先把\u003cstrong>等待 D2H 完成、执行 H2D、记录完成事件\u003c/strong>排入接收流，再发出 ACK。上游拷贝完成时，GPU1 的拷贝引擎就能开始搬这一段。","dma.pipelineNote":"上游把下一段搬到主机时，下游可以同时取走上一段。160 MiB 的数据分十次经过主机上的八段缓冲。发送端收到对应的 ACK，并确认 H2D 已完成，就能复用那一段空间。","dma.receivedNote":"整块输入到达 GPU1 后，计算流开始算 S1(C0)。此时 GPU0 已发完这块数据，可以复用输出槽。","dma.releaseNote":"等 GPU1 算完 S1(C0)，接收槽就能给下一块使用。输出槽、主机缓冲区和接收槽的回收时间各自取决于最后一次读取何时结束。","load.native":"原生 XQA：各请求分片数相同","load.active":"有工作的 CTA：{0} / 170","load.tasks":"\u003cbr>{0} 个子任务","load.diagram":"原生 XQA 和 KV 分桶时各 CTA 分到的工作量","load.nativeMax":"原生路径最忙的 CTA","load.bucketMax":"分桶后最忙的 CTA","load.batch":"整批请求的工作量","load.counts":"{0} 个子任务，分入 {1} 个非空桶","load.uniformStart":"请求长度相同时，原生划分本来就很均匀。两种方法里，最忙的 CTA 都处理 \u003cstrong>","load.uniformEnd":" 块\u003c/strong>。","load.skewNote":"原生划分把长请求交给少数 CTA，最忙的一个要处理 \u003cstrong>{0} 块\u003c/strong>。分桶后，每个 CTA 最多处理 \u003cstrong>{1} 块\u003c/strong>。同一个桶跨到下一个请求时，会新开一个子任务。","bucket.requests":"请求","bucket.pack":"分桶","bucket.run":"执行子任务","bucket.partials":"合并局部结果","bucket.cost":"KV 长度决定工作量","bucket.tileSize":"每格代表 256 个 KV token","bucket.summary":"共 {0} 块，分给 {1} 个 CTA，每桶最多 {2} 块","bucket.skew":"B32：一个长请求，31 个短请求","bucket.tileAxis":"按请求顺序排列 KV 块","bucket.budgetTitle":"每桶分多少","bucket.budgetCalc":"{0} ÷ 170，向上取整为 {1} 块","bucket.identity":"区分桶内的请求","bucket.boundary":"遇到新请求就新建子任务","bucket.example":"8 个桶里共有 9 个子任务","bucket.select":"点击一个 CTA，查看分给它的子任务","bucket.empty":"空桶","bucket.ctaPath":"每个 CTA 依次处理桶内的子任务","bucket.order":"CTA {0} 的执行顺序","bucket.inside":"每个子任务的计算步骤","bucket.readQ":"读取当前请求的 Q","bucket.readTiles":"遍历分到的 KV 块","bucket.softmax":"逐块更新在线 softmax","bucket.write":"写出局部结果","bucket.max":"170 个 CTA，每个最多处理 6 块","bucket.sequence":"CTA {0} 的子任务","bucket.mergeTitle":"各子任务分别写出结果，再按请求合并","bucket.taskCount":"{0} 个子任务","bucket.byRequest":"按请求归约","bucket.other":"其余请求也各自合并局部结果。","bucket.diagram":"从 KV 分块到子任务分配，再到按请求合并结果","bucket.total":"整批 KV 块数","bucket.reqCount":"{0} 个请求","bucket.budget":"每桶最多容纳","bucket.active":"{0} 个 CTA 分到了工作","bucket.slots":"局部结果槽数","bucket.count":"共 {0} 个桶","bucket.requestsNote":"每个请求都有自己的 Q、KV 页表和输出位置。分桶先读取这一批请求各自的 KV 长度。","bucket.tilesNote":"每 256 个 token 划为一个 KV 块。把各请求的块数依次累加，就能算出每个请求的起止编号。调度只用这些编号，KV 数据仍在原来的缓存页里。","bucket.packNote":"每桶最多装 \u003cstrong>{0} 块 KV\u003c/strong>。CTA {1} 分到 \u003cstrong>{2} 个子任务\u003c/strong>{3}","bucket.cross":"，分别属于不同请求。","bucket.same":"。","bucket.runNote":"每个 CTA 依次执行桶内的子任务。在一个子任务内，每处理一个 KV 块就更新一次在线 softmax，处理完最后一块才写出局部结果。","bucket.mergeNote":"每个请求单独计数。最后完成子任务的 CTA 读取该请求的全部局部结果，合并得到 O。如果整个请求只有一个子任务，就直接写出 O。","bucket.table":"\u003ctable>\u003cthead>\u003ctr>\u003cth>子任务\u003c/th>\u003cth>请求\u003c/th>\u003cth>KV 块区间\u003c/th>\u003cth>块数\u003c/th>\u003cth>桶 / CTA\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>","merge.start":"开始","merge.t2":"T2 完成","merge.t0":"T0 完成","merge.t4":"T4 完成","merge.t3":"T3 完成","merge.tasks":"子任务","merge.done":"完成","merge.running":"计算","merge.wait":"等待局部结果","merge.counter":"完成计数","merge.winner":"负责最终归约","merge.output":"6 × 256 / 最终输出","merge.pending":"等待归约","merge.reweight":"读取五份局部结果，重新计算权重","merge.order":"完成顺序：T2 → T0 → T4 → T3 → T1","merge.reset":"写出结果，本轮计数复位","merge.publish":"各子任务写入各自的结果槽","merge.diagram":"五个子任务陆续完成，最后一个 CTA 合并结果","merge.startNote":"请求 R0 分成五个子任务，分别在不同 CTA 上执行。每个子任务在显存里都有自己的结果槽。","merge.t2Note":"T2 最先完成。它写入 O₂、m₂ 和 l₂，再给 R0 的完成计数加一。","merge.t0Note":"T0 也算完了。现在有两份局部结果可以读取，另外三个子任务还在算。","merge.t4Note":"T4 写入第三份结果。T3 和 T1 还在算，谁最后完成就由谁合并。","merge.t3Note":"T3 写入第四份结果，只剩 T1。","merge.t1Note":"T1 更新计数时读到旧值 4，知道自己是第五个。它读出五份局部结果，按各自的 softmax 权重合并，写出请求 R0 的输出。","fusion.readInput":"读取输入","fusion.normQuant":"归一化与量化","fusion.gemm":"写出 GEMM 输入","fusion.readProj":"读取投影结果","fusion.qkv":"归一化与旋转","fusion.store":"写入缓存和输出","fusion.final":"合并注意力结果","fusion.gateQuant":"门控与量化","fusion.project":"写出投影输入","fusion.fused":"融合","fusion.native":"原生","norm.inputNote":"一个 CTA 处理一行 5120 个元素。它读取输入、残差和归一化权重，先做残差加法，再对一行的平方和做归约。","norm.fusedNote":"每个 warp 先用 shuffle 求出自己的部分和。10 个 FP32 部分和写入共享内存，由 warp 0 汇总并计算均方根的倒数。每个线程把 16 个归一化结果舍入为 BF16，再用同一个 E4M3 缩放因子打包成 FP4。","norm.nativeNote":"残差相加和 RMSNorm 先算出 BF16 张量 y，写入全局内存。随后量化算子重新读取 y，打包成 NVFP4。","norm.outNote":"融合算子写出\u003cstrong>更新后的 BF16 残差、打包好的 FP4 值和按原有布局排列的缩放因子\u003c/strong>。MLP 可以直接读取这份输入做矩阵乘法。","norm.unfusedOut":"残差以 BF16 写出。另一个量化算子写出 FP4 值和缩放因子，供 MLP 读取。","front.inputNote":"输入包括 QKV 投影结果、位置、缓存槽位和量化缩放因子。Q 分支还带有后面要用的门控值。","front.fusedNote":"每个 CTA 有 128 个线程，处理一个 token 的一个 Q 头或 K 头。四个 warp 通过共享内存合并平方和。K 旋转后立即打包成 FP4，V 则从投影结果直接量化。二者写到同一个 token 对应的缓存位置。","front.nativeNote":"先对 Q 和 K 做归一化和旋转，写出中间结果。后续算子再读取 K 和 V，量化后追加到分页 KV 缓存。","front.outNote":"算子写出 \u003cstrong>BF16 的 Q 和门控值\u003c/strong>，并把 \u003cstrong>NVFP4 的 K/V 和缩放因子\u003c/strong>写到缓存页。XQA 仍可用原有页表读取它们。","tail.inputNote":"只有一个子任务时，它直接算出注意力输出 O。有多个子任务时，最后完成的 CTA 先合并整个请求的局部结果，得到 O。","tail.fusedNote":"写出 O 的线程接着计算 sigmoid 门控，按 BF16 舍入并相乘，再用固定的缩放因子量化成 FP8，供输出投影直接读取。","tail.nativeNote":"注意力算子先写出 BF16 的 O。后续算子重新读入 O，乘上门控值，再量化成 FP8。","tail.outNote":"\u003cstrong>E4M3 格式的 FP8 输出\u003c/strong>可直接用于输出投影。各分片仍按原来的精度计算和合并局部结果。","tail.unfusedOut":"后续算子写出 FP8 张量，输出投影再读入它。","chart.prefillRow":"\u003cdiv class=\"bench-row\">\u003cdiv class=\"bench-row-title\">\u003cspan>每个请求 {0} 个输入 token\u003c/span>\u003cspan class=\"bench-gain\">−{1}%\u003c/span>\u003c/div>{2}{3}\u003c/div>","chart.uniform":"32 × 8K","load.splits":"每行分 {0} 片","load.budget":"每桶最多 {0} 块","path.forward":"去程","path.return":"回程","path.native":"原生","path.bucket":"分桶","load.global":"全局 KV 分桶","load.tileCount":"{0} 个 KV 块","load.nativeTip":"请求 {0}，每个请求分 {1} 片","load.axis":"CTA 编号","dma.gpuCompute":"GPU{0} · 计算","dma.proxy":"GPU{0} · 代理线程","dma.ringId":"主机缓冲段编号","dma.source":"输出槽 0","dma.host":"主机环形缓冲区","dma.dest":"接收槽","merge.scratch":"暂存局部结果","merge.request":"请求 R0","merge.lastCTA":"T1 所在的 CTA","merge.lastStep":"T1 完成并归约","bucket.finalCTA":"最后一个 CTA","bucket.kvTiles":"划分 KV 块","bucket.tileUnits":"块","bucket.tileCount":"{0} 块","bucket.tokenCount":"{0} 个 token","bucket.selectedSummary":"CTA {0} · {1} 块 · {2} 个子任务","bucket.pair":"桶 {0} / CTA{0}","bucket.task":"子任务 {0}","dma.sourceBlock":"S0(C{0}) · 输出槽 {1}","dma.segment":"段 {0}","bucket.tileTip":"\u003cstrong>请求 R{0}，块编号 {1}\u003c/strong>token 区间 [{2}, {3})","bucket.globalTip":"\u003cstrong>全局编号 {0}\u003c/strong>请求 R{1}，块编号 {2}","bucket.taskTip":"\u003cstrong>CTA {0} / 子任务 {1}\u003c/strong>请求 R{2} 的块区间 [{3},{4})","bucket.ctaTip":"\u003cstrong>CTA {0}\u003c/strong>{1} 块"}</script>
 <script>/* Original SM120 schematic. Geometry is illustrative; memory paths follow the kernels. */
 'use strict';
 (() => {
@@ -3331,38 +3331,38 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     norm: {
       name: ['Residual / RMSNorm / NVFP4', '残差 / RMSNorm / NVFP4'],
       input: ['x + residual + γ', 'x + residual + γ'],
-      value: ['BF16 y · 5120 values', 'BF16 y · 5120 个值'],
+      value: ['BF16 y · 5120 values', 'BF16 y · 每行 5120 个值'],
       arithmetic: ['Add → RMSNorm', '残差相加 → RMSNorm'],
-      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
-      shared: ['10 warp partials → warp 0', '10 个 Warp 的部分和 → Warp 0'],
-      bytes: ['10 KiB / direction / token', '10 KiB / 方向 / Token'],
-      output: ['FP4 + scales; BF16 residual', 'FP4 + Scale；BF16 残差'],
+      pack: ['group16 → NVFP4', '每 16 个值一组'],
+      shared: ['10 warp partials → warp 0', '10 个 warp 求和，由 warp 0 汇总'],
+      bytes: ['10 KiB / direction / token', '每个 token 读、写各 10 KiB'],
+      output: ['FP4 + scales; BF16 residual', 'FP4 和缩放因子、BF16 残差'],
       next: ['Next: NVFP4 GEMM', '下游：NVFP4 GEMM'],
-      kept: ['BF16 rounding in RF → FP4 packing', 'RF 内保留 BF16 舍入 → FP4 打包'],
+      kept: ['BF16 rounding in RF → FP4 packing', '在寄存器内舍入到 BF16，再打包成 FP4'],
     },
     front: {
-      name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 追加'],
+      name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 写入'],
       input: ['QKV projection + γ', 'QKV 投影 + γ'],
-      value: ['BF16 K · 256 values / head', 'BF16 K · 256 个值 / Head'],
+      value: ['BF16 K · 256 values / head', 'BF16 K · 每头 256 个值'],
       arithmetic: ['QK Norm → RoPE', 'QK Norm → RoPE'],
-      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
-      shared: ['4 warp partials → warp 0', '4 个 Warp 的部分和 → Warp 0'],
-      bytes: ['512 B / direction / K head', '512 B / 方向 / K Head'],
-      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q / gate：BF16；K/V：FP4 + Scale'],
-      next: ['Next: paged XQA', '下游：Paged XQA'],
+      pack: ['group16 → NVFP4', '每 16 个值一组'],
+      shared: ['4 warp partials → warp 0', '4 个 warp 求和，由 warp 0 汇总'],
+      bytes: ['512 B / direction / K head', '每个 K 头读、写各 512 B'],
+      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q 和门控值用 BF16，K/V 用 FP4 加缩放因子'],
+      next: ['Next: paged XQA', '下游：分页 XQA'],
       kept: ['K: Norm → RoPE → pack; V: pack', 'K：Norm → RoPE → 打包；V：直接打包'],
     },
     tail: {
-      name: ['Attention output / gate / FP8', 'Attention 输出 / Gate / FP8'],
-      input: ['Attention result + gate', 'Attention 结果 + Gate'],
-      value: ['BF16 O · 1536 values / rank', 'BF16 O · 1536 个值 / Rank'],
+      name: ['Attention output / gate / FP8', '注意力输出 / 门控 / FP8'],
+      input: ['Attention result + gate', '注意力结果和门控值'],
+      value: ['BF16 O · 1536 values / rank', 'BF16 O · 每卡 1536 个值'],
       arithmetic: ['Normalize / final merge', '归一化 / 最终合并'],
-      pack: ['Gate → E4M3', 'Gate → E4M3'],
+      pack: ['Gate → E4M3', '门控 → E4M3'],
       shared: ['', ''],
-      bytes: ['3 KiB / direction / token / rank', '3 KiB / 方向 / Token / Rank'],
-      output: ['8 E4M3 values / 8 B store', '8 个 E4M3 / 8 B 写出'],
+      bytes: ['3 KiB / direction / token / rank', '每卡每 token 读、写各 3 KiB'],
+      output: ['8 E4M3 values / 8 B store', '一次写出 8 个 E4M3 值（8 B）'],
       next: ['Next: FP8 output projection', '下游：FP8 输出投影'],
-      kept: ['Final writer: BF16 gate → FP8 packing', '最终 Writer：BF16 Gate → FP8 打包'],
+      kept: ['Final writer: BF16 gate → FP8 packing', '合并后做 BF16 门控，再打包成 FP8'],
     },
   };
   const canvas = document.createElement('canvas');
@@ -3413,10 +3413,10 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     let drawing = '';
 
     // Layout uses the host's CSS width as SVG units, keeping labels at their CSS size.
-    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终 O + 加载的 Gate') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
+    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终结果 O 和门控值') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
     const sm = {x: 8, y: 72, w: compact ? width - 16 : width - 210};
     const part = {x: compact ? 38 : 24, y: compact ? 160 : 174, w: compact ? width - 76 : sm.w - 32};
-    const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 14).length * 18;
+    const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'warp 调度与发射'), part.w - 38, 14).length * 18;
     const rf = {x: part.x + 12, y: part.y + 15 + schedulerHeight + 18, w: part.w - 24};
     rf.h = 48 + wrap(rfValue, rf.w - 20, 14).length * 18;
     const gap = 10;
@@ -3434,7 +3434,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     const blockHeight = (title, body, w) => wrap(title, w - 20, 16).length * 20 + (body ? 10 + wrap(body, w - 20, 14).length * 18 : 0);
     const shared = {x: part.x, y: part.y + part.h + 18, w: part.w, h: blockHeight(sharedTitle, sharedBody, part.w) + 24};
     sm.h = shared.y + shared.h + 20 - sm.y;
-    const memoryDetail = phase === 1 && fused ? '' : kind === 'tail' && fused && phase === 0 ? local('BF16 gate input', 'BF16 Gate 输入') : phase === 1 ? pick(operation.value) : phase === 0 ? pick(operation.input) : pick(operation.output);
+    const memoryDetail = phase === 1 && fused ? '' : kind === 'tail' && fused && phase === 0 ? local('BF16 gate input', 'BF16 门控输入') : phase === 1 ? pick(operation.value) : phase === 0 ? pick(operation.input) : pick(operation.output);
     const memoryNote = phase === 1 && !fused ? pick(operation.bytes) : phase === 2 ? pick(operation.next) : local('Global address space', '全局地址空间');
     const memoryBody = [memoryDetail, memoryNote].filter(Boolean).join(' · ');
     const memory = {x: compact ? 38 : width - 180, w: compact ? width - 76 : 164};
@@ -3458,9 +3458,9 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     drawing += `<path d="M${sm.x + 14 + miniWidth / 2} 142 V152 H${part.x + 12} V${part.y}" class="sm-expansion"/>`;
     drawing += rect(part.x, part.y, part.w, part.h, 'sm-expanded', 6);
     drawing += rect(part.x + 12, part.y + 15, part.w - 24, schedulerHeight, 'sm-unit');
-    drawing += text(part.x + part.w / 2, part.y + 15 + 10 + 14, local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 'sm-label', 'middle');
+    drawing += text(part.x + part.w / 2, part.y + 15 + 10 + 14, local('Warp scheduler / dispatch', 'warp 调度与发射'), part.w - 38, 'sm-label', 'middle');
     drawing += rect(rf.x, rf.y, rf.w, rf.h, `sm-register${phase === 1 && fused ? ' is-current' : ''}`);
-    drawing += text(rf.x + rf.w / 2, rf.y + 23, local('Register file · RF', '寄存器文件 · RF'), rf.w - 20, 'sm-heading', 'middle');
+    drawing += text(rf.x + rf.w / 2, rf.y + 23, local('Register file · RF', '寄存器组（RF）'), rf.w - 20, 'sm-heading', 'middle');
     drawing += text(rf.x + rf.w / 2, rf.y + 45, rfValue, rf.w - 20, 'sm-small', 'middle');
     const stripeWidth = (rf.w - 28) / 8;
     for (let stripe = 0; stripe < 8; stripe++) drawing += rect(rf.x + 10 + stripe * (stripeWidth + 1), rf.y + rf.h - 12, stripeWidth - 2, 5, 'sm-register-stripe', 1);
@@ -3479,11 +3479,11 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       const tile = (cuda.w - 22) / 8;
       drawing += rect(cuda.x + 8 + (lane % 8) * tile, cuda.y + 44 + Math.floor(lane / 8) * 6, tile - 2, 4, 'sm-cuda-lane', 0);
     }
-    const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: 'Final merge'}[kind];
+    const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: local('Final merge', '最终归约')}[kind];
     const arithmetic = compact ? compactArithmetic : pick(operation.arithmetic);
-    const pack = compact && kind !== 'tail' ? 'NVFP4 group16' : pick(operation.pack);
+    const pack = compact && kind !== 'tail' ? local('NVFP4 group16', '每组 16 个值') : pick(operation.pack);
     const computeLabel = phase === 0 ? arithmetic : fused || phase === 2 ? pack : arithmetic;
-    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 通道'), cuda.w - 16, 'sm-small', 'middle');
+    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 个通道'), cuda.w - 16, 'sm-small', 'middle');
     drawing += text(cuda.cx, cuda.y + 115, computeLabel, cuda.w - 16, 'sm-small', 'middle');
     drawing += rect(tensor.x, tensor.y, tensor.w, tensor.h, 'sm-unit');
     drawing += text(tensor.cx, tensor.y + 25, 'Tensor Core', tensor.w - 16, 'sm-heading', 'middle');
@@ -3531,9 +3531,9 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     if (phase === 1 && !fused) drawing += route(`M${center - 6} ${gddr.y} V${memory.y + memory.h}`, 'native', false, 'is-conditional');
     drawing += text(center + 10, memory.y + memory.h + 26, local('Miss / eviction', '未命中 / 驱逐'), memory.w / 2 - 14, 'sm-small');
 
-    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', 'Gate：L2 → LD/ST → RF；最终 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
+    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', '门控值从 L2 读入寄存器，最终结果 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
     const footerY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
-    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '输出写出')]];
+    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '写出结果')]];
     const columns = compact ? 2 : 4;
     const legendRowHeight = compact ? 42 : 24;
     legend.forEach(([color, label], index) => {
@@ -3544,7 +3544,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     });
     const height = footerY + (compact ? legendRowHeight * 2 : legendRowHeight);
     const defs = ['load', 'native', 'fused', 'output'].map(color => `<marker id="${id}-${color}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" class="sm-arrow-${color}"/></marker>`).join('');
-    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '四个 SMSP，展开其中一个。打包在 CUDA 通道执行；L1/共享内存是独立协作路径。GDDR7 流量取决于 L2 未命中或驱逐。')} ${caption}`;
+    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '图中展开了四个执行分区（SMSP）中的一个。CUDA 执行单元负责打包，线程可通过共享内存交换数据。L2 未命中或需要写回时才会访问 GDDR7。')} ${caption}`;
     host.innerHTML = `<svg class="sm-svg" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="${id}-title ${id}-desc" xmlns="http://www.w3.org/2000/svg"><title id="${id}-title">${escape(title)}</title><desc id="${id}-desc">${escape(description)}</desc><defs>${defs}</defs>${drawing}</svg>`;
   };
 })();
@@ -3565,7 +3565,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     const receiveTitle = local('H2D Stream', '接收流 H2D');
     const computeTitle = local('Compute Stream', '计算流');
     const sendTitle = local('D2H Stream', '发送流 D2H');
-    const computeBody = local('S1 / S6 · serial local stages', 'S1 / S6 · 本地阶段串行');
+    const computeBody = local('S1 / S6 · serial local stages', 'S1、S6 交替执行');
     const hostTitle = local('Host proxy thread', '主机代理线程');
     const hostBody = local('Event · READY / ACK', '事件 · READY / ACK');
     const slotTitle = index => local(`Slot ${index}`, `槽 ${index}`);
@@ -3617,12 +3617,12 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     const left = gpu.x + (narrow ? 24 : 16);
     const middle = narrow ? left : left + leftWidth + 18;
     const right = narrow ? left : middle + receiveWidth + 18;
-    const copy = local('GPU copy engine', 'GPU 复制引擎');
+    const copy = local('GPU copy engine', 'GPU 拷贝引擎');
     const h2d = geometry(left, narrow ? 194 : 146, leftWidth, heightFor(receiveTitle, copy, leftWidth));
     const receiveRow = Math.max(36, 12 + wrap(local('R0 · current input', '槽 0 · 当前输入'), receiveWidth - 40, 14).length * 18);
     const receive = geometry(middle, narrow ? h2d.bottom + 34 : 112, receiveWidth, 64 + receiveRow * 3 + 12);
     const compute = geometry(middle, receive.bottom + 36, receiveWidth, heightFor(computeTitle, computeBody, receiveWidth));
-    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '较早输出'), sourceWidth - 20));
+    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '上一块输出'), sourceWidth - 20));
     const source = geometry(right, narrow ? compute.bottom + 36 : 290, sourceWidth, 64 + sourceRow * 2 + 8 + 12);
     const d2h = geometry(right, narrow ? source.bottom + 36 : 146, sourceWidth, heightFor(sendTitle, copy, sourceWidth));
     gpu.h = (narrow ? d2h.bottom : Math.max(source.bottom, compute.bottom)) + 20 - gpu.y;
@@ -3671,13 +3671,13 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     drawing += frame(source.x, source.y, source.w, source.h, 'rt-arena rt-send');
     drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲'), source.w - 20, true);
     drawing += text(source.cx, source.y + 47, local('2 shared slots', '共享 2 个槽'), source.w - 20);
-    [local('Earlier output', '较早输出'), local('Current output', '当前输出')].forEach((label, index) => {
+    [local('Earlier output', '上一块输出'), local('Current output', '当前输出')].forEach((label, index) => {
       const y = source.y + 60 + index * (sourceRow + 8);
       drawing += `<g data-rank-slot="source-${index}">${box(source.x + 10, y, source.w - 20, sourceRow, `source-slot-${index}`, slotTitle(index), label, `rt-slot rt-${index ? 'compute' : 'send'}`)}</g>`;
     });
     drawing += box(hostBox.x, hostBox.y, hostBox.w, hostBox.h, 'host-proxy', hostTitle, hostBody, 'rt-host');
-    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 Rank 拓扑：共享缓冲与三条可并行的 CUDA Stream');
-    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'Forward 输入来自 GPU0，Return 输入来自 GPU2。H2D 写入共享的三个 Receive 槽，Compute 执行 S1 或 S6，两个 Source 槽经 D2H 发往 GPU2 或 GPU0。实线表示数据依赖，虚线连接 Host 控制；三条 Stream 可重叠处理不同 Chunk。');
+    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 的共享缓冲区和三条 CUDA 流');
+    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 从 GPU0 收到去程输入，从 GPU2 收到回程输入。接收流把数据写入三个共享槽，计算流执行 S1 或 S6，发送流把两个输出槽中的结果发往下一张卡。实线表示数据流向，虚线表示主机控制。三条流可以同时处理不同的块。');
     const defs = ['receive', 'compute', 'send', 'control'].map(role => `<marker id="${id}-${role}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8 Z" class="rt-arrow rt-${role}"/></marker>`).join('');
     const top = narrow ? 0 : 40;
     const height = Math.max(hostBox.bottom, ...outputs.map(endpoint => endpoint.bottom)) + 16 - top;
@@ -3844,7 +3844,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       const W=960,H=207,left=77,right=24,pw=W-left-right;const xx=t=>left+t/total*pw;let a='';
       for(let i=0;i<=6;i++){const x=left+i*pw/6;a+=`<line x1="${x}" y1="26" x2="${x}" y2="177" class="grid"/>`+tx(x,194,fmt(total*i/6,1),'axis','text-anchor="middle"');}
       for(let r=0;r<4;r++){const y=37+r*35;a+=tx(15,y+15,'GPU'+r,'track-label');a+=rect(left,y,pw,25,'var(--trace-lane)','none',3);}
-      data.nodes.forEach(e=>{const x=xx(e.start),y=37+e.rank*35,width=e.duration/total*pw,isR=kind==='vpp'&&e.stage>=4;let color=isR?'var(--trace-return)':'var(--trace-forward)';const highlight=s.highlight<0||s.highlight===e.chunk;const past=e.start<t||s.step===5;const opacity=(highlight?1:.13)*(past?1:.2);const tip=msg('pipe.tip', kind.toUpperCase(), e.rank, e.chunk, e.stage, isR?'Return':'Forward', e.chunk, fmt(e.start), fmt(e.end), fmt(e.duration));
+      data.nodes.forEach(e=>{const x=xx(e.start),y=37+e.rank*35,width=e.duration/total*pw,isR=kind==='vpp'&&e.stage>=4;let color=isR?'var(--trace-return)':'var(--trace-forward)';const highlight=s.highlight<0||s.highlight===e.chunk;const past=e.start<t||s.step===5;const opacity=(highlight?1:.13)*(past?1:.2);const tip=msg('pipe.tip', kind.toUpperCase(), e.rank, e.chunk, e.stage, msg(isR?'path.return':'path.forward'), e.chunk, fmt(e.start), fmt(e.end), fmt(e.duration));
         a+=`<g opacity="${opacity}" data-tip="${esc(tip)}">${rect(x,y,Math.max(.7,width-1),25,color,'none',3,`data-morph="${kind}-${e.chunk}-${e.stage}"`)}${width>(e.chunk<10?22:28)?tx(x+width/2,y+17,`C${e.chunk}`,'block-label','text-anchor="middle"'):''}</g>`;
       });
       if(s.step!==5){a+=`<line x1="${xx(t)}" x2="${xx(t)}" y1="19" y2="179" stroke="var(--trace-cursor)" stroke-width="1.6"/>`+tx(Math.min(W-60,xx(t)+5),15,`${fmt(t,1)} u`,'phase-label');}
@@ -3899,15 +3899,15 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     const id='dma-timeline';steps('dma-steps',[msg('dma.ready'),msg('dma.d2h'),msg('dma.h2d'),msg('dma.pipeline'),msg('dma.received'),msg('dma.release')],dmaStep,i=>{dmaStep=i;renderDMA(true);});
     const t=[2.8,3.0,3.08,4.55,5.7,9.2][dmaStep],W=960,H=400,left=145,pw=785,x=t=>left+t/10*pw;let a='';
     for(let i=0;i<=5;i++){a+=`<line x1="${x(i*2)}" x2="${x(i*2)}" y1="22" y2="361" class="grid"/>`+tx(x(i*2),383,String(i*2),'axis','text-anchor="middle"');}
-    const rows=[['GPU0 · Compute',42],['GPU0 · CPU',86],['GPU0 · D2H',128],['Host · Ring ID',177],['GPU1 · CPU',225],['GPU1 · H2D',268],['GPU1 · Compute',322]];
+    const rows=[[msg('dma.gpuCompute', 0),42],[msg('dma.proxy', 0),86],['GPU0 · D2H',128],[msg('dma.ringId'),177],[msg('dma.proxy', 1),225],['GPU1 · H2D',268],[msg('dma.gpuCompute', 1),322]];
     rows.forEach(([l,y])=>{a+=tx(12,y+14,l,'track-label')+rect(left,y,pw,24,'var(--trace-lane)','none',3);});
     function block(start,dur,y,label,color){a+=`<g opacity="${start<=t?1:.2}">${rect(x(start),y,dur/10*pw-1,24,color,'none',3)}${dur/10*pw>35?tx(x(start+dur/2),y+15,label,'block-label','text-anchor="middle"'):''}</g>`;}
-    block(0,4,42,'S0(C0) · Source0','var(--trace-forward)');block(4.15,4,42,'S0(C1) · Source1','var(--trace-forward-alt)');
+    block(0,4,42,msg('dma.sourceBlock', 0, 0),'var(--trace-forward)');block(4.15,4,42,msg('dma.sourceBlock', 1, 1),'var(--trace-forward-alt)');
     block(5.6,3.5,322,'S1(C0)','var(--trace-forward)');
     for(let i=0;i<10;i++){
       const d=2.9+.24*i,h=3.16+.24*i,ring=i%8;
       block(d,.22,128,'','var(--trace-send)');block(h,.22,268,'','var(--trace-receive)');
-      if(i===0||i===9){a+=tx(x(d+.11),122,`Seg${i}`,'axis','text-anchor="middle"')+tx(x(h+.11),301,`Seg${i}`,'axis','text-anchor="middle"');}
+      if(i===0||i===9){a+=tx(x(d+.11),122,msg('dma.segment', i),'axis','text-anchor="middle"')+tx(x(h+.11),301,msg('dma.segment', i),'axis','text-anchor="middle"');}
       const op=d<=t?1:.15;
       a+=`<g opacity="${op}">${rect(x(d),177,.22/10*pw,24,'var(--trace-ring)','var(--trace-ring)',3)}${tx(x(d+.11),194,String(ring),'block-label','text-anchor="middle"')}</g>`;
       if(i===0||i===8){a+=`<path d="M${x(d+.22)} 152 V250 H${x(h)} V268" fill="none" stroke="var(--trace-receive)" stroke-width="1.1" stroke-dasharray="3 3" opacity="${d<=t?.8:.16}"/>`;}
@@ -3920,7 +3920,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     a+=`<line x1="${x(t)}" x2="${x(t)}" y1="15" y2="360" stroke="var(--trace-cursor)" stroke-width="1.6"/>`+tx(x(t)+4,12,fmt(t,2)+' u','phase-label');
     svg(id,a,W,H,msg('dma.diagram'),animate);
     const source=t>=5.28,ring=t>=5.54,dest=t>=9.1;
-    $('#dma-credits').innerHTML=[['Source Slot0',source?msg('dma.free'):msg('dma.held'),source],['Host Ring',ring?msg('dma.read'):msg('dma.cycle'),ring],['Receive Slot',dest?msg('dma.free'):t>=5.54?msg('dma.consuming'):t>=3.02?msg('dma.writing'):msg('dma.waiting'),dest]].map(([l,v,free])=>`<div class="credit ${free?'free':''}"><strong>${l}</strong>${v}</div>`).join('');
+    $('#dma-credits').innerHTML=[[msg('dma.source'),source?msg('dma.free'):msg('dma.held'),source],[msg('dma.host'),ring?msg('dma.read'):msg('dma.cycle'),ring],[msg('dma.dest'),dest?msg('dma.free'):t>=5.54?msg('dma.consuming'):t>=3.02?msg('dma.writing'):msg('dma.waiting'),dest]].map(([l,v,free])=>`<div class="credit ${free?'free':''}"><strong>${l}</strong>${v}</div>`).join('');
     const desc=[
       msg('dma.readyNote'),
       msg('dma.d2hNote'),
@@ -3962,7 +3962,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 
     const panels = [
       [native, msg('load.native'), '#99a9b7'],
-      [bucket, 'Global KV Bucket', 'var(--accent)'],
+      [bucket, msg('load.global'), 'var(--accent)'],
     ];
     panels.forEach(([plan, name, color], panel) => {
       const origin = panel * panelHeight;
@@ -3980,8 +3980,8 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       plan.loads.forEach((tiles, i) => {
         const height = tiles / maxTiles * plotHeight;
         const task = native.tasks[i];
-        let tip = `<strong>CTA ${i} · ${name}</strong>${tiles} KV tiles`;
-        if (plan === native && task) tip += `<br>Request ${task.request} · ${native.splits} splits / request`;
+        let tip = `<strong>CTA ${i} · ${name}</strong>${msg('load.tileCount', tiles)}`;
+        if (plan === native && task) tip += `<br>${msg('load.nativeTip', task.request, native.splits)}`;
         if (plan === bucket) tip += msg('load.tasks', bucket.buckets[i].end - bucket.buckets[i].begin);
         drawing += rect(left + i * pitch, baseline - height, pitch * 0.84, Math.max(1, height),
           tiles ? color : 'var(--border)', 'none', 0, `data-tip="${esc(tip)}" data-morph="load-${panel}-${i}"`);
@@ -3991,12 +3991,12 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
           'diagram-small diagram-mono', 'text-anchor="middle"');
       }
     });
-    drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
+    drawing += tx((left + right) / 2, 2 * panelHeight + 3, msg('load.axis'), 'diagram-small diagram-mono', 'text-anchor="middle"');
     svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
     metrics('load-metrics', [
-      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', msg('load.splits', native.splits)],
-      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', msg('load.budget', bucket.budget)],
-      [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
+      [msg('load.nativeMax'), Math.max(...native.loads), msg('bucket.tileUnits'), msg('load.splits', native.splits)],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), msg('bucket.tileUnits'), msg('load.budget', bucket.budget)],
+      [msg('load.batch'), bucket.total, msg('bucket.tileUnits'), msg('load.counts', bucket.tasks.length, bucket.active)],
     ]);
     const note = loadPreset === 'uniform'
       ? msg('load.uniformStart') + maxTiles + msg('load.uniformEnd')
@@ -4016,39 +4016,39 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   function bucketData(){return bucketState.preset==='teaching'?taskPlan([2304,768,512,256],8):taskPlan(presets.skew32,170);}
   function renderBucket(animate=false){
     const s=bucketState,p=bucketData(),small=s.preset==='teaching',id='bucket-diagram',W=960;let a='',H=340;
-    steps('bucket-steps',[msg('bucket.requests'),'KV Tiles',msg('bucket.pack'),msg('bucket.run'),msg('bucket.partials')],s.step,i=>{s.step=i;renderBucket(true);});
+    steps('bucket-steps',[msg('bucket.requests'),msg('bucket.kvTiles'),msg('bucket.pack'),msg('bucket.run'),msg('bucket.partials')],s.step,i=>{s.step=i;renderBucket(true);});
     const sel=$('#bucket-selected');if(sel.options.length!==p.ctas){sel.innerHTML=Array.from({length:p.ctas},(_,i)=>`<option value="${i}">CTA ${i}</option>`).join('');s.selected=Math.min(s.selected,p.ctas-1);}sel.value=String(s.selected);
     const selected=p.buckets[s.selected],st=p.tasks.slice(selected.begin,selected.end);
     if(s.step<=1 && small){
       a+=tx(26,23,s.step===0?msg('bucket.cost'):msg('bucket.tileSize'),'diagram-title');
       p.counts.forEach((n,r)=>{const y=52+r*59;a+=tx(27,y+20,`R${r}`,'diagram-label diagram-mono');
-        if(s.step===0){a+=rect(75,y,n*56-5,32,rc(r),'none',4,`data-morph="request-${r}"`)+tx(90+n*56,y+21,`${p.lengths[r].toLocaleString()} Tokens`,'diagram-label');}
-        else{for(let t=0;t<n;t++)a+=`<g data-tip="${esc(`<strong>R${r} / Tile ${t}</strong>KV Tokens [${t*256}, ${(t+1)*256})`)}">${rect(75+t*56,y,49,32,rc(r),'none',4,`data-morph="tile-${r}-${t}"`)}${tx(99+t*56,y+21,`T${t}`,'tile-label','text-anchor="middle"')}</g>`;a+=tx(90+n*56,y+21,`${n} Tiles`,'diagram-label');}
+        if(s.step===0){a+=rect(75,y,n*56-5,32,rc(r),'none',4,`data-morph="request-${r}"`)+tx(90+n*56,y+21,msg('bucket.tokenCount', p.lengths[r].toLocaleString()),'diagram-label');}
+        else{for(let t=0;t<n;t++)a+=`<g data-tip="${esc(msg('bucket.tileTip', r, t, t*256, (t+1)*256))}">${rect(75+t*56,y,49,32,rc(r),'none',4,`data-morph="tile-${r}-${t}"`)}${tx(99+t*56,y+21,`T${t}`,'tile-label','text-anchor="middle"')}</g>`;a+=tx(90+n*56,y+21,msg('bucket.tileCount', n),'diagram-label');}
       });a+=tx(28,314,msg('bucket.summary', p.total, p.ctas, p.budget),'diagram-caption');
     } else if(s.step<=1){
       H=360;a+=tx(26,25,s.step===0?msg('bucket.skew'):msg('bucket.tileAxis'),'diagram-title');
       if(s.step===0){p.counts.forEach((n,r)=>{const col=r<16?0:1,row=r%16,x=25+col*460,y=46+row*17;const w=n/511*300;a+=tx(x,y+8,`R${r}`,'diagram-small diagram-mono')+rect(x+35,y,Math.max(3,w),10,rc(r),'none',2)+tx(x+351,y+8,`${p.lengths[r]}`,'diagram-small diagram-mono');});}
-      else {let offset=0;p.counts.forEach((n,r)=>{for(let t=0;t<n;t++){const global=offset+t,x=25+global/p.total*910;a+=rect(x,72,Math.max(.6,910/p.total-.15),62,rc(r),'none',0,`data-tip="${esc(`<strong>Global ${global}</strong>R${r} / Tile ${t}`)}"`);}offset+=n;});a+=tx(25,157,'0','diagram-small diagram-mono')+tx(935,157,`${p.total} Tiles`,'diagram-small diagram-mono','text-anchor="end"');a+=box(90,205,320,75,msg('bucket.budgetTitle'),msg('bucket.budgetCalc', p.total, p.budget),true);a+=box(510,205,320,75,msg('bucket.identity'),msg('bucket.boundary'),false);}
+      else {let offset=0;p.counts.forEach((n,r)=>{for(let t=0;t<n;t++){const global=offset+t,x=25+global/p.total*910;a+=rect(x,72,Math.max(.6,910/p.total-.15),62,rc(r),'none',0,`data-tip="${esc(msg('bucket.globalTip', global, r, t))}"`);}offset+=n;});a+=tx(25,157,'0','diagram-small diagram-mono')+tx(935,157,msg('bucket.tileCount', p.total),'diagram-small diagram-mono','text-anchor="end"');a+=box(90,205,320,75,msg('bucket.budgetTitle'),msg('bucket.budgetCalc', p.total, p.budget),true);a+=box(510,205,320,75,msg('bucket.identity'),msg('bucket.boundary'),false);}
     } else if(s.step===2 && small){
       H=335;a+=tx(25,25,msg('bucket.example'),'diagram-title');
-      p.buckets.forEach((b,i)=>{const x=24+i%4*234,y=46+Math.floor(i/4)*124;const selected=i===s.selected;const tasks=p.tasks.slice(b.begin,b.end);a+=rect(x,y,212,104,selected?'var(--accent-soft)':'var(--panel-2)',selected?'var(--accent)':'var(--border)',7,`data-cta="${i}" style="cursor:pointer"`)+tx(x+12,y+20,`Bucket ${i} / CTA${i}`,'diagram-label diagram-mono');let local=0;tasks.forEach(t=>{const count=t.end-t.begin,start=local;for(let j=t.begin;j<t.end;j++){const xx=x+12+local*92;a+=rect(xx,y+37,85,31,rc(t.request),'none',4,`data-morph="tile-${t.request}-${j}" data-cta="${i}" style="cursor:pointer"`)+tx(xx+42,y+57,`R${t.request} · T${j}`,'tile-label','text-anchor="middle"');local++;}a+=tx(x+12+(start+count/2)*92-4,y+86,`Task ${t.slot}`,'diagram-small diagram-mono','text-anchor="middle"');});});
-      a+=tx(25,320,`CTA ${s.selected}：`+st.map(t=>`Task${t.slot} = R${t.request} [${t.begin},${t.end})`).join('  →  '),'diagram-caption');
+      p.buckets.forEach((b,i)=>{const x=24+i%4*234,y=46+Math.floor(i/4)*124;const selected=i===s.selected;const tasks=p.tasks.slice(b.begin,b.end);a+=rect(x,y,212,104,selected?'var(--accent-soft)':'var(--panel-2)',selected?'var(--accent)':'var(--border)',7,`data-cta="${i}" style="cursor:pointer"`)+tx(x+12,y+20,msg('bucket.pair', i),'diagram-label diagram-mono');let local=0;tasks.forEach(t=>{const count=t.end-t.begin,start=local;for(let j=t.begin;j<t.end;j++){const xx=x+12+local*92;a+=rect(xx,y+37,85,31,rc(t.request),'none',4,`data-morph="tile-${t.request}-${j}" data-cta="${i}" style="cursor:pointer"`)+tx(xx+42,y+57,`R${t.request} · T${j}`,'tile-label','text-anchor="middle"');local++;}a+=tx(x+12+(start+count/2)*92-4,y+86,msg('bucket.task', t.slot),'diagram-small diagram-mono','text-anchor="middle"');});});
+      a+=tx(25,320,`CTA ${s.selected}：`+st.map(t=>`T${t.slot} = R${t.request} [${t.begin},${t.end})`).join('  →  '),'diagram-caption');
     } else if(s.step===2){
       H=385;a+=tx(24,24,msg('bucket.select'),'diagram-title');
-      p.buckets.forEach((b,i)=>{const x=24+i%17*54,y=45+Math.floor(i/17)*27,active=i===s.selected;a+=rect(x,y,48,22,'var(--panel-2)',active?'var(--accent)':'var(--border)',3,`stroke-width="${active?2:1}" data-cta="${i}" style="cursor:pointer"`);let off=0;const tasks=p.tasks.slice(b.begin,b.end);tasks.forEach(t=>{const w=(t.end-t.begin)/p.budget*46;a+=rect(x+1+off,y+1,w,20,rc(t.request),'none',2,`data-cta="${i}" style="cursor:pointer" data-tip="${esc(`<strong>CTA ${i} / Task${t.slot}</strong>R${t.request} · KV Tile [${t.begin},${t.end})`)}"`);off+=w;});});
-      a+=tx(24,337,`CTA ${s.selected} · ${p.loads[s.selected]} Tiles · ${st.length} Tasks`,'diagram-title');a+=tx(24,361,st.map(t=>`Task${t.slot}: R${t.request} [${t.begin},${t.end})`).join('  →  ')||msg('bucket.empty'),'diagram-small diagram-mono');
+      p.buckets.forEach((b,i)=>{const x=24+i%17*54,y=45+Math.floor(i/17)*27,active=i===s.selected;a+=rect(x,y,48,22,'var(--panel-2)',active?'var(--accent)':'var(--border)',3,`stroke-width="${active?2:1}" data-cta="${i}" style="cursor:pointer"`);let off=0;const tasks=p.tasks.slice(b.begin,b.end);tasks.forEach(t=>{const w=(t.end-t.begin)/p.budget*46;a+=rect(x+1+off,y+1,w,20,rc(t.request),'none',2,`data-cta="${i}" style="cursor:pointer" data-tip="${esc(msg('bucket.taskTip', i, t.slot, t.request, t.begin, t.end))}"`);off+=w;});});
+      a+=tx(24,337,msg('bucket.selectedSummary', s.selected, p.loads[s.selected], st.length),'diagram-title');a+=tx(24,361,st.map(t=>`T${t.slot}: R${t.request} [${t.begin},${t.end})`).join('  →  ')||msg('bucket.empty'),'diagram-small diagram-mono');
     } else if(s.step===3){
       H=small?335:350;a+=tx(24,25,msg('bucket.ctaPath'),'diagram-title');
-      if(small){p.buckets.forEach((b,i)=>{const y=48+i*29;const active=i===s.selected;a+=tx(25,y+15,`CTA${i}`,'diagram-label diagram-mono')+rect(90,y,392,22,'var(--panel-2)','none',3);let offset=0;p.tasks.slice(b.begin,b.end).forEach(t=>{const w=(t.end-t.begin)*180;a+=rect(90+offset,y,w-2,22,rc(t.request),active?'var(--accent)':'none',3)+tx(90+offset+w/2,y+15,`Task${t.slot} / R${t.request}`,'tile-label','text-anchor="middle"');offset+=w;});});a+=box(537,67,383,83,msg('bucket.order', s.selected),st.map(t=>`Task${t.slot}`).join(' → ')||msg('bucket.empty'),true);a+=tx(554,184,msg('bucket.inside'),'diagram-title');[msg('bucket.readQ'),msg('bucket.readTiles'),msg('bucket.softmax'),msg('bucket.write')].forEach((t,i)=>a+=tx(554,213+i*25,t,'diagram-label'));}
-      else {const max=Math.max(...p.loads,1),left=30,pw=895;p.loads.forEach((v,i)=>{const x=left+i/p.ctas*pw,h=v/max*150;a+=rect(x,210-h,pw/p.ctas-1,h,'var(--accent)','none',1,`data-cta="${i}" data-tip="${esc(`<strong>CTA ${i}</strong>${v} Tiles`)}"`);});a+=tx(30,236,msg('bucket.max'),'diagram-small diagram-mono');a+=box(30,263,890,66,msg('bucket.sequence', s.selected),st.map(t=>`Task${t.slot}: R${t.request} [${t.begin},${t.end})`).join(' → ')||msg('bucket.empty'),true);}
+      if(small){p.buckets.forEach((b,i)=>{const y=48+i*29;const active=i===s.selected;a+=tx(25,y+15,`CTA${i}`,'diagram-label diagram-mono')+rect(90,y,392,22,'var(--panel-2)','none',3);let offset=0;p.tasks.slice(b.begin,b.end).forEach(t=>{const w=(t.end-t.begin)*180;a+=rect(90+offset,y,w-2,22,rc(t.request),active?'var(--accent)':'none',3)+tx(90+offset+w/2,y+15,`T${t.slot} / R${t.request}`,'tile-label','text-anchor="middle"');offset+=w;});});a+=box(537,67,383,83,msg('bucket.order', s.selected),st.map(t=>`T${t.slot}`).join(' → ')||msg('bucket.empty'),true);a+=tx(554,184,msg('bucket.inside'),'diagram-title');[msg('bucket.readQ'),msg('bucket.readTiles'),msg('bucket.softmax'),msg('bucket.write')].forEach((t,i)=>a+=tx(554,213+i*25,t,'diagram-label'));}
+      else {const max=Math.max(...p.loads,1),left=30,pw=895;p.loads.forEach((v,i)=>{const x=left+i/p.ctas*pw,h=v/max*150;a+=rect(x,210-h,pw/p.ctas-1,h,'var(--accent)','none',1,`data-cta="${i}" data-tip="${esc(msg('bucket.ctaTip', i, v))}"`);});a+=tx(30,236,msg('bucket.max'),'diagram-small diagram-mono');a+=box(30,263,890,66,msg('bucket.sequence', s.selected),st.map(t=>`T${t.slot}: R${t.request} [${t.begin},${t.end})`).join(' → ')||msg('bucket.empty'),true);}
     } else {
       H=small?337:370;a+=tx(24,25,msg('bucket.mergeTitle'),'diagram-title');
       const show=small?[0,1,2,3]:[0,1,2,31];
-      show.forEach((r,k)=>{const y=48+k*69,range=p.requests[r];a+=box(25,y,128,48,`R${r}`,msg('bucket.taskCount', range.count),false);a+=path(`M153 ${y+24} H207`,true,id);const total=range.count;const showparts=Math.min(total,7);for(let j=0;j<showparts;j++)a+=rect(212+j*49,y+7,42,34,rc(r),'none',4)+tx(233+j*49,y+29,j===showparts-1&&total>7?'…':`P${j}`,'tile-label','text-anchor="middle"');a+=path(`M565 ${y+24} H627`,true,id)+box(633,y,135,48,'Last CTA',msg('bucket.byRequest'),true)+path(`M768 ${y+24} H814`,true,id)+box(820,y,112,48,`O_R${r}`,'6 × 256',true);});if(!small)a+=tx(26,353,msg('bucket.other'),'diagram-small');
+      show.forEach((r,k)=>{const y=48+k*69,range=p.requests[r];a+=box(25,y,128,48,`R${r}`,msg('bucket.taskCount', range.count),false);a+=path(`M153 ${y+24} H207`,true,id);const total=range.count;const showparts=Math.min(total,7);for(let j=0;j<showparts;j++)a+=rect(212+j*49,y+7,42,34,rc(r),'none',4)+tx(233+j*49,y+29,j===showparts-1&&total>7?'…':`P${j}`,'tile-label','text-anchor="middle"');a+=path(`M565 ${y+24} H627`,true,id)+box(633,y,135,48,msg('bucket.finalCTA'),msg('bucket.byRequest'),true)+path(`M768 ${y+24} H814`,true,id)+box(820,y,112,48,`O_R${r}`,'6 × 256',true);});if(!small)a+=tx(26,353,msg('bucket.other'),'diagram-small');
     }
     svg(id,a,W,H,msg('bucket.diagram'),animate);
     $('#bucket-diagram').onclick=e=>{const n=e.target.closest('[data-cta]');if(n){s.selected=+n.dataset.cta;renderBucket(true);}};
-    metrics('bucket-stats',[[msg('bucket.total'),p.total,'Tiles',msg('bucket.reqCount', p.lengths.filter(x=>x>0).length)],[msg('bucket.budget'),p.budget,'Tiles',msg('bucket.active', p.active)],[msg('bucket.slots'),p.tasks.length,'',msg('bucket.count', p.ctas)]]);
+    metrics('bucket-stats',[[msg('bucket.total'),p.total,msg('bucket.tileUnits'),msg('bucket.reqCount', p.lengths.filter(x=>x>0).length)],[msg('bucket.budget'),p.budget,msg('bucket.tileUnits'),msg('bucket.active', p.active)],[msg('bucket.slots'),p.tasks.length,'',msg('bucket.count', p.ctas)]]);
     const cross=st.length>1;
     const desc=[
       msg('bucket.requestsNote'),
@@ -4064,10 +4064,10 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 
   // ---------- Last-CTA reduction ----------
   let mergeStep=5;
-  function renderMerge(animate=false){const id='merge-diagram',order=[2,0,4,3,1],done=new Set(order.slice(0,mergeStep));steps('merge-steps',[msg('merge.start'),msg('merge.t2'),msg('merge.t0'),msg('merge.t4'),msg('merge.t3'),'T1 → Merge'],mergeStep,i=>{mergeStep=i;renderMerge(true);});let a='';
-    a+=tx(35,24,msg('merge.tasks'),'diagram-title')+tx(272,24,'Global Scratch','diagram-title')+tx(627,24,'Request R0','diagram-title');
-    for(let i=0;i<5;i++){const y=43+i*47,ok=done.has(i);a+=rect(26,y,148,33,ok?'var(--accent-soft)':'var(--panel-2)',ok?'var(--accent)':'var(--border)',5)+tx(100,y+21,`Task ${i} · ${ok?msg('merge.done'):msg('merge.running')}`,'diagram-label diagram-mono','text-anchor="middle"');a+=path(`M174 ${y+17} H253`,ok,id);a+=rect(260,y,202,33,ok?'var(--blue-soft)':'var(--panel-2)',ok?'var(--blue)':'var(--border)',5)+tx(361,y+21,ok?`O${i} · m${i} · l${i}`:msg('merge.wait'),'diagram-label diagram-mono','text-anchor="middle"');if(ok)a+=path(`M462 ${y+17} H540 V145 H600`,mergeStep===5,id);}
-    a+=box(603,115,160,62,mergeStep===5?'CTA of Task 1':msg('merge.counter'),mergeStep===5?msg('merge.winner'):`${mergeStep} / 5`,mergeStep===5);a+=path('M763 146 H798',mergeStep===5,id);a+=box(803,115,132,62,'O_R0',mergeStep===5?msg('merge.output'):msg('merge.pending'),mergeStep===5);
+  function renderMerge(animate=false){const id='merge-diagram',order=[2,0,4,3,1],done=new Set(order.slice(0,mergeStep));steps('merge-steps',[msg('merge.start'),msg('merge.t2'),msg('merge.t0'),msg('merge.t4'),msg('merge.t3'),msg('merge.lastStep')],mergeStep,i=>{mergeStep=i;renderMerge(true);});let a='';
+    a+=tx(35,24,msg('merge.tasks'),'diagram-title')+tx(272,24,msg('merge.scratch'),'diagram-title')+tx(627,24,msg('merge.request'),'diagram-title');
+    for(let i=0;i<5;i++){const y=43+i*47,ok=done.has(i);a+=rect(26,y,148,33,ok?'var(--accent-soft)':'var(--panel-2)',ok?'var(--accent)':'var(--border)',5)+tx(100,y+21,`${msg('bucket.task', i)} · ${ok?msg('merge.done'):msg('merge.running')}`,'diagram-label diagram-mono','text-anchor="middle"');a+=path(`M174 ${y+17} H253`,ok,id);a+=rect(260,y,202,33,ok?'var(--blue-soft)':'var(--panel-2)',ok?'var(--blue)':'var(--border)',5)+tx(361,y+21,ok?`O${i} · m${i} · l${i}`:msg('merge.wait'),'diagram-label diagram-mono','text-anchor="middle"');if(ok)a+=path(`M462 ${y+17} H540 V145 H600`,mergeStep===5,id);}
+    a+=box(603,115,160,62,mergeStep===5?msg('merge.lastCTA'):msg('merge.counter'),mergeStep===5?msg('merge.winner'):`${mergeStep} / 5`,mergeStep===5);a+=path('M763 146 H798',mergeStep===5,id);a+=box(803,115,132,62,'O_R0',mergeStep===5?msg('merge.output'):msg('merge.pending'),mergeStep===5);
     a+=tx(608,211,mergeStep===5?msg('merge.reweight'):msg('merge.order'),'diagram-small');a+=tx(608,239,mergeStep===5?msg('merge.reset'):msg('merge.publish'),'diagram-small');
     svg(id,a,960,300,msg('merge.diagram'),animate);
     const texts=[msg('merge.startNote'),msg('merge.t2Note'),msg('merge.t0Note'),msg('merge.t4Note'),msg('merge.t3Note'),msg('merge.t1Note')];
@@ -4119,7 +4119,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   function barline(name,value,width,baseline){return `<div class="barline"><span class="barname">${name}</span><div class="bartrack"><div class="barfill ${baseline?'baseline':''}" style="width:${Math.min(100,width)}%"></div></div><span class="barvalue">${value}</span></div>`;}
   function renderPrefill(){const max=Math.max(...data.prefill.map(r=>+r.cpp_ms));$('#prefill-chart').innerHTML=data.prefill.map(r=>{const c=+r.cpp_ms,v=+r.vpp_ms,rel=prefillMetric==='relative',scale=rel?c:max;return msg('chart.prefillRow', r.input_tokens==='131071'?'128K':(+r.input_tokens/1024)+'K', fmt((c-v)/c*100), barline('CPP',rel?'100.0%':fmt(c/1000,3)+' s',c/scale*100,true), barline('VPP',rel?fmt(v/c*100,1)+'%':fmt(v/1000,3)+' s',v/scale*100,false));}).join('');$$('#prefill-metric button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===prefillMetric)));}
   $('#prefill-metric').addEventListener('click',e=>{const b=e.target.closest('button[data-value]');if(b){prefillMetric=b.dataset.value;renderPrefill();}});
-  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'128K + 8 × 4K','128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
+  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'128K + 8 × 4K','128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline(msg('path.native'),fmt(n,2)+' ms',n/max*100,true)}${barline(msg('path.bucket'),fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
 
   renderPipe();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
   // Deterministic model functions are exposed for reproducibility and automated checks.

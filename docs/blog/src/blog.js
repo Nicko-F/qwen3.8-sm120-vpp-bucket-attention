@@ -157,7 +157,7 @@
       const W=960,H=207,left=77,right=24,pw=W-left-right;const xx=t=>left+t/total*pw;let a='';
       for(let i=0;i<=6;i++){const x=left+i*pw/6;a+=`<line x1="${x}" y1="26" x2="${x}" y2="177" class="grid"/>`+tx(x,194,fmt(total*i/6,1),'axis','text-anchor="middle"');}
       for(let r=0;r<4;r++){const y=37+r*35;a+=tx(15,y+15,'GPU'+r,'track-label');a+=rect(left,y,pw,25,'var(--trace-lane)','none',3);}
-      data.nodes.forEach(e=>{const x=xx(e.start),y=37+e.rank*35,width=e.duration/total*pw,isR=kind==='vpp'&&e.stage>=4;let color=isR?'var(--trace-return)':'var(--trace-forward)';const highlight=s.highlight<0||s.highlight===e.chunk;const past=e.start<t||s.step===5;const opacity=(highlight?1:.13)*(past?1:.2);const tip=msg('pipe.tip', kind.toUpperCase(), e.rank, e.chunk, e.stage, isR?'Return':'Forward', e.chunk, fmt(e.start), fmt(e.end), fmt(e.duration));
+      data.nodes.forEach(e=>{const x=xx(e.start),y=37+e.rank*35,width=e.duration/total*pw,isR=kind==='vpp'&&e.stage>=4;let color=isR?'var(--trace-return)':'var(--trace-forward)';const highlight=s.highlight<0||s.highlight===e.chunk;const past=e.start<t||s.step===5;const opacity=(highlight?1:.13)*(past?1:.2);const tip=msg('pipe.tip', kind.toUpperCase(), e.rank, e.chunk, e.stage, msg(isR?'path.return':'path.forward'), e.chunk, fmt(e.start), fmt(e.end), fmt(e.duration));
         a+=`<g opacity="${opacity}" data-tip="${esc(tip)}">${rect(x,y,Math.max(.7,width-1),25,color,'none',3,`data-morph="${kind}-${e.chunk}-${e.stage}"`)}${width>(e.chunk<10?22:28)?tx(x+width/2,y+17,`C${e.chunk}`,'block-label','text-anchor="middle"'):''}</g>`;
       });
       if(s.step!==5){a+=`<line x1="${xx(t)}" x2="${xx(t)}" y1="19" y2="179" stroke="var(--trace-cursor)" stroke-width="1.6"/>`+tx(Math.min(W-60,xx(t)+5),15,`${fmt(t,1)} u`,'phase-label');}
@@ -212,15 +212,15 @@
     const id='dma-timeline';steps('dma-steps',[msg('dma.ready'),msg('dma.d2h'),msg('dma.h2d'),msg('dma.pipeline'),msg('dma.received'),msg('dma.release')],dmaStep,i=>{dmaStep=i;renderDMA(true);});
     const t=[2.8,3.0,3.08,4.55,5.7,9.2][dmaStep],W=960,H=400,left=145,pw=785,x=t=>left+t/10*pw;let a='';
     for(let i=0;i<=5;i++){a+=`<line x1="${x(i*2)}" x2="${x(i*2)}" y1="22" y2="361" class="grid"/>`+tx(x(i*2),383,String(i*2),'axis','text-anchor="middle"');}
-    const rows=[['GPU0 · Compute',42],['GPU0 · CPU',86],['GPU0 · D2H',128],['Host · Ring ID',177],['GPU1 · CPU',225],['GPU1 · H2D',268],['GPU1 · Compute',322]];
+    const rows=[[msg('dma.gpuCompute', 0),42],[msg('dma.proxy', 0),86],['GPU0 · D2H',128],[msg('dma.ringId'),177],[msg('dma.proxy', 1),225],['GPU1 · H2D',268],[msg('dma.gpuCompute', 1),322]];
     rows.forEach(([l,y])=>{a+=tx(12,y+14,l,'track-label')+rect(left,y,pw,24,'var(--trace-lane)','none',3);});
     function block(start,dur,y,label,color){a+=`<g opacity="${start<=t?1:.2}">${rect(x(start),y,dur/10*pw-1,24,color,'none',3)}${dur/10*pw>35?tx(x(start+dur/2),y+15,label,'block-label','text-anchor="middle"'):''}</g>`;}
-    block(0,4,42,'S0(C0) · Source0','var(--trace-forward)');block(4.15,4,42,'S0(C1) · Source1','var(--trace-forward-alt)');
+    block(0,4,42,msg('dma.sourceBlock', 0, 0),'var(--trace-forward)');block(4.15,4,42,msg('dma.sourceBlock', 1, 1),'var(--trace-forward-alt)');
     block(5.6,3.5,322,'S1(C0)','var(--trace-forward)');
     for(let i=0;i<10;i++){
       const d=2.9+.24*i,h=3.16+.24*i,ring=i%8;
       block(d,.22,128,'','var(--trace-send)');block(h,.22,268,'','var(--trace-receive)');
-      if(i===0||i===9){a+=tx(x(d+.11),122,`Seg${i}`,'axis','text-anchor="middle"')+tx(x(h+.11),301,`Seg${i}`,'axis','text-anchor="middle"');}
+      if(i===0||i===9){a+=tx(x(d+.11),122,msg('dma.segment', i),'axis','text-anchor="middle"')+tx(x(h+.11),301,msg('dma.segment', i),'axis','text-anchor="middle"');}
       const op=d<=t?1:.15;
       a+=`<g opacity="${op}">${rect(x(d),177,.22/10*pw,24,'var(--trace-ring)','var(--trace-ring)',3)}${tx(x(d+.11),194,String(ring),'block-label','text-anchor="middle"')}</g>`;
       if(i===0||i===8){a+=`<path d="M${x(d+.22)} 152 V250 H${x(h)} V268" fill="none" stroke="var(--trace-receive)" stroke-width="1.1" stroke-dasharray="3 3" opacity="${d<=t?.8:.16}"/>`;}
@@ -233,7 +233,7 @@
     a+=`<line x1="${x(t)}" x2="${x(t)}" y1="15" y2="360" stroke="var(--trace-cursor)" stroke-width="1.6"/>`+tx(x(t)+4,12,fmt(t,2)+' u','phase-label');
     svg(id,a,W,H,msg('dma.diagram'),animate);
     const source=t>=5.28,ring=t>=5.54,dest=t>=9.1;
-    $('#dma-credits').innerHTML=[['Source Slot0',source?msg('dma.free'):msg('dma.held'),source],['Host Ring',ring?msg('dma.read'):msg('dma.cycle'),ring],['Receive Slot',dest?msg('dma.free'):t>=5.54?msg('dma.consuming'):t>=3.02?msg('dma.writing'):msg('dma.waiting'),dest]].map(([l,v,free])=>`<div class="credit ${free?'free':''}"><strong>${l}</strong>${v}</div>`).join('');
+    $('#dma-credits').innerHTML=[[msg('dma.source'),source?msg('dma.free'):msg('dma.held'),source],[msg('dma.host'),ring?msg('dma.read'):msg('dma.cycle'),ring],[msg('dma.dest'),dest?msg('dma.free'):t>=5.54?msg('dma.consuming'):t>=3.02?msg('dma.writing'):msg('dma.waiting'),dest]].map(([l,v,free])=>`<div class="credit ${free?'free':''}"><strong>${l}</strong>${v}</div>`).join('');
     const desc=[
       msg('dma.readyNote'),
       msg('dma.d2hNote'),
@@ -275,7 +275,7 @@
 
     const panels = [
       [native, msg('load.native'), '#99a9b7'],
-      [bucket, 'Global KV Bucket', 'var(--accent)'],
+      [bucket, msg('load.global'), 'var(--accent)'],
     ];
     panels.forEach(([plan, name, color], panel) => {
       const origin = panel * panelHeight;
@@ -293,8 +293,8 @@
       plan.loads.forEach((tiles, i) => {
         const height = tiles / maxTiles * plotHeight;
         const task = native.tasks[i];
-        let tip = `<strong>CTA ${i} · ${name}</strong>${tiles} KV tiles`;
-        if (plan === native && task) tip += `<br>Request ${task.request} · ${native.splits} splits / request`;
+        let tip = `<strong>CTA ${i} · ${name}</strong>${msg('load.tileCount', tiles)}`;
+        if (plan === native && task) tip += `<br>${msg('load.nativeTip', task.request, native.splits)}`;
         if (plan === bucket) tip += msg('load.tasks', bucket.buckets[i].end - bucket.buckets[i].begin);
         drawing += rect(left + i * pitch, baseline - height, pitch * 0.84, Math.max(1, height),
           tiles ? color : 'var(--border)', 'none', 0, `data-tip="${esc(tip)}" data-morph="load-${panel}-${i}"`);
@@ -304,12 +304,12 @@
           'diagram-small diagram-mono', 'text-anchor="middle"');
       }
     });
-    drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
+    drawing += tx((left + right) / 2, 2 * panelHeight + 3, msg('load.axis'), 'diagram-small diagram-mono', 'text-anchor="middle"');
     svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
     metrics('load-metrics', [
-      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', msg('load.splits', native.splits)],
-      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', msg('load.budget', bucket.budget)],
-      [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
+      [msg('load.nativeMax'), Math.max(...native.loads), msg('bucket.tileUnits'), msg('load.splits', native.splits)],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), msg('bucket.tileUnits'), msg('load.budget', bucket.budget)],
+      [msg('load.batch'), bucket.total, msg('bucket.tileUnits'), msg('load.counts', bucket.tasks.length, bucket.active)],
     ]);
     const note = loadPreset === 'uniform'
       ? msg('load.uniformStart') + maxTiles + msg('load.uniformEnd')
@@ -329,39 +329,39 @@
   function bucketData(){return bucketState.preset==='teaching'?taskPlan([2304,768,512,256],8):taskPlan(presets.skew32,170);}
   function renderBucket(animate=false){
     const s=bucketState,p=bucketData(),small=s.preset==='teaching',id='bucket-diagram',W=960;let a='',H=340;
-    steps('bucket-steps',[msg('bucket.requests'),'KV Tiles',msg('bucket.pack'),msg('bucket.run'),msg('bucket.partials')],s.step,i=>{s.step=i;renderBucket(true);});
+    steps('bucket-steps',[msg('bucket.requests'),msg('bucket.kvTiles'),msg('bucket.pack'),msg('bucket.run'),msg('bucket.partials')],s.step,i=>{s.step=i;renderBucket(true);});
     const sel=$('#bucket-selected');if(sel.options.length!==p.ctas){sel.innerHTML=Array.from({length:p.ctas},(_,i)=>`<option value="${i}">CTA ${i}</option>`).join('');s.selected=Math.min(s.selected,p.ctas-1);}sel.value=String(s.selected);
     const selected=p.buckets[s.selected],st=p.tasks.slice(selected.begin,selected.end);
     if(s.step<=1 && small){
       a+=tx(26,23,s.step===0?msg('bucket.cost'):msg('bucket.tileSize'),'diagram-title');
       p.counts.forEach((n,r)=>{const y=52+r*59;a+=tx(27,y+20,`R${r}`,'diagram-label diagram-mono');
-        if(s.step===0){a+=rect(75,y,n*56-5,32,rc(r),'none',4,`data-morph="request-${r}"`)+tx(90+n*56,y+21,`${p.lengths[r].toLocaleString()} Tokens`,'diagram-label');}
-        else{for(let t=0;t<n;t++)a+=`<g data-tip="${esc(`<strong>R${r} / Tile ${t}</strong>KV Tokens [${t*256}, ${(t+1)*256})`)}">${rect(75+t*56,y,49,32,rc(r),'none',4,`data-morph="tile-${r}-${t}"`)}${tx(99+t*56,y+21,`T${t}`,'tile-label','text-anchor="middle"')}</g>`;a+=tx(90+n*56,y+21,`${n} Tiles`,'diagram-label');}
+        if(s.step===0){a+=rect(75,y,n*56-5,32,rc(r),'none',4,`data-morph="request-${r}"`)+tx(90+n*56,y+21,msg('bucket.tokenCount', p.lengths[r].toLocaleString()),'diagram-label');}
+        else{for(let t=0;t<n;t++)a+=`<g data-tip="${esc(msg('bucket.tileTip', r, t, t*256, (t+1)*256))}">${rect(75+t*56,y,49,32,rc(r),'none',4,`data-morph="tile-${r}-${t}"`)}${tx(99+t*56,y+21,`T${t}`,'tile-label','text-anchor="middle"')}</g>`;a+=tx(90+n*56,y+21,msg('bucket.tileCount', n),'diagram-label');}
       });a+=tx(28,314,msg('bucket.summary', p.total, p.ctas, p.budget),'diagram-caption');
     } else if(s.step<=1){
       H=360;a+=tx(26,25,s.step===0?msg('bucket.skew'):msg('bucket.tileAxis'),'diagram-title');
       if(s.step===0){p.counts.forEach((n,r)=>{const col=r<16?0:1,row=r%16,x=25+col*460,y=46+row*17;const w=n/511*300;a+=tx(x,y+8,`R${r}`,'diagram-small diagram-mono')+rect(x+35,y,Math.max(3,w),10,rc(r),'none',2)+tx(x+351,y+8,`${p.lengths[r]}`,'diagram-small diagram-mono');});}
-      else {let offset=0;p.counts.forEach((n,r)=>{for(let t=0;t<n;t++){const global=offset+t,x=25+global/p.total*910;a+=rect(x,72,Math.max(.6,910/p.total-.15),62,rc(r),'none',0,`data-tip="${esc(`<strong>Global ${global}</strong>R${r} / Tile ${t}`)}"`);}offset+=n;});a+=tx(25,157,'0','diagram-small diagram-mono')+tx(935,157,`${p.total} Tiles`,'diagram-small diagram-mono','text-anchor="end"');a+=box(90,205,320,75,msg('bucket.budgetTitle'),msg('bucket.budgetCalc', p.total, p.budget),true);a+=box(510,205,320,75,msg('bucket.identity'),msg('bucket.boundary'),false);}
+      else {let offset=0;p.counts.forEach((n,r)=>{for(let t=0;t<n;t++){const global=offset+t,x=25+global/p.total*910;a+=rect(x,72,Math.max(.6,910/p.total-.15),62,rc(r),'none',0,`data-tip="${esc(msg('bucket.globalTip', global, r, t))}"`);}offset+=n;});a+=tx(25,157,'0','diagram-small diagram-mono')+tx(935,157,msg('bucket.tileCount', p.total),'diagram-small diagram-mono','text-anchor="end"');a+=box(90,205,320,75,msg('bucket.budgetTitle'),msg('bucket.budgetCalc', p.total, p.budget),true);a+=box(510,205,320,75,msg('bucket.identity'),msg('bucket.boundary'),false);}
     } else if(s.step===2 && small){
       H=335;a+=tx(25,25,msg('bucket.example'),'diagram-title');
-      p.buckets.forEach((b,i)=>{const x=24+i%4*234,y=46+Math.floor(i/4)*124;const selected=i===s.selected;const tasks=p.tasks.slice(b.begin,b.end);a+=rect(x,y,212,104,selected?'var(--accent-soft)':'var(--panel-2)',selected?'var(--accent)':'var(--border)',7,`data-cta="${i}" style="cursor:pointer"`)+tx(x+12,y+20,`Bucket ${i} / CTA${i}`,'diagram-label diagram-mono');let local=0;tasks.forEach(t=>{const count=t.end-t.begin,start=local;for(let j=t.begin;j<t.end;j++){const xx=x+12+local*92;a+=rect(xx,y+37,85,31,rc(t.request),'none',4,`data-morph="tile-${t.request}-${j}" data-cta="${i}" style="cursor:pointer"`)+tx(xx+42,y+57,`R${t.request} · T${j}`,'tile-label','text-anchor="middle"');local++;}a+=tx(x+12+(start+count/2)*92-4,y+86,`Task ${t.slot}`,'diagram-small diagram-mono','text-anchor="middle"');});});
-      a+=tx(25,320,`CTA ${s.selected}：`+st.map(t=>`Task${t.slot} = R${t.request} [${t.begin},${t.end})`).join('  →  '),'diagram-caption');
+      p.buckets.forEach((b,i)=>{const x=24+i%4*234,y=46+Math.floor(i/4)*124;const selected=i===s.selected;const tasks=p.tasks.slice(b.begin,b.end);a+=rect(x,y,212,104,selected?'var(--accent-soft)':'var(--panel-2)',selected?'var(--accent)':'var(--border)',7,`data-cta="${i}" style="cursor:pointer"`)+tx(x+12,y+20,msg('bucket.pair', i),'diagram-label diagram-mono');let local=0;tasks.forEach(t=>{const count=t.end-t.begin,start=local;for(let j=t.begin;j<t.end;j++){const xx=x+12+local*92;a+=rect(xx,y+37,85,31,rc(t.request),'none',4,`data-morph="tile-${t.request}-${j}" data-cta="${i}" style="cursor:pointer"`)+tx(xx+42,y+57,`R${t.request} · T${j}`,'tile-label','text-anchor="middle"');local++;}a+=tx(x+12+(start+count/2)*92-4,y+86,msg('bucket.task', t.slot),'diagram-small diagram-mono','text-anchor="middle"');});});
+      a+=tx(25,320,`CTA ${s.selected}：`+st.map(t=>`T${t.slot} = R${t.request} [${t.begin},${t.end})`).join('  →  '),'diagram-caption');
     } else if(s.step===2){
       H=385;a+=tx(24,24,msg('bucket.select'),'diagram-title');
-      p.buckets.forEach((b,i)=>{const x=24+i%17*54,y=45+Math.floor(i/17)*27,active=i===s.selected;a+=rect(x,y,48,22,'var(--panel-2)',active?'var(--accent)':'var(--border)',3,`stroke-width="${active?2:1}" data-cta="${i}" style="cursor:pointer"`);let off=0;const tasks=p.tasks.slice(b.begin,b.end);tasks.forEach(t=>{const w=(t.end-t.begin)/p.budget*46;a+=rect(x+1+off,y+1,w,20,rc(t.request),'none',2,`data-cta="${i}" style="cursor:pointer" data-tip="${esc(`<strong>CTA ${i} / Task${t.slot}</strong>R${t.request} · KV Tile [${t.begin},${t.end})`)}"`);off+=w;});});
-      a+=tx(24,337,`CTA ${s.selected} · ${p.loads[s.selected]} Tiles · ${st.length} Tasks`,'diagram-title');a+=tx(24,361,st.map(t=>`Task${t.slot}: R${t.request} [${t.begin},${t.end})`).join('  →  ')||msg('bucket.empty'),'diagram-small diagram-mono');
+      p.buckets.forEach((b,i)=>{const x=24+i%17*54,y=45+Math.floor(i/17)*27,active=i===s.selected;a+=rect(x,y,48,22,'var(--panel-2)',active?'var(--accent)':'var(--border)',3,`stroke-width="${active?2:1}" data-cta="${i}" style="cursor:pointer"`);let off=0;const tasks=p.tasks.slice(b.begin,b.end);tasks.forEach(t=>{const w=(t.end-t.begin)/p.budget*46;a+=rect(x+1+off,y+1,w,20,rc(t.request),'none',2,`data-cta="${i}" style="cursor:pointer" data-tip="${esc(msg('bucket.taskTip', i, t.slot, t.request, t.begin, t.end))}"`);off+=w;});});
+      a+=tx(24,337,msg('bucket.selectedSummary', s.selected, p.loads[s.selected], st.length),'diagram-title');a+=tx(24,361,st.map(t=>`T${t.slot}: R${t.request} [${t.begin},${t.end})`).join('  →  ')||msg('bucket.empty'),'diagram-small diagram-mono');
     } else if(s.step===3){
       H=small?335:350;a+=tx(24,25,msg('bucket.ctaPath'),'diagram-title');
-      if(small){p.buckets.forEach((b,i)=>{const y=48+i*29;const active=i===s.selected;a+=tx(25,y+15,`CTA${i}`,'diagram-label diagram-mono')+rect(90,y,392,22,'var(--panel-2)','none',3);let offset=0;p.tasks.slice(b.begin,b.end).forEach(t=>{const w=(t.end-t.begin)*180;a+=rect(90+offset,y,w-2,22,rc(t.request),active?'var(--accent)':'none',3)+tx(90+offset+w/2,y+15,`Task${t.slot} / R${t.request}`,'tile-label','text-anchor="middle"');offset+=w;});});a+=box(537,67,383,83,msg('bucket.order', s.selected),st.map(t=>`Task${t.slot}`).join(' → ')||msg('bucket.empty'),true);a+=tx(554,184,msg('bucket.inside'),'diagram-title');[msg('bucket.readQ'),msg('bucket.readTiles'),msg('bucket.softmax'),msg('bucket.write')].forEach((t,i)=>a+=tx(554,213+i*25,t,'diagram-label'));}
-      else {const max=Math.max(...p.loads,1),left=30,pw=895;p.loads.forEach((v,i)=>{const x=left+i/p.ctas*pw,h=v/max*150;a+=rect(x,210-h,pw/p.ctas-1,h,'var(--accent)','none',1,`data-cta="${i}" data-tip="${esc(`<strong>CTA ${i}</strong>${v} Tiles`)}"`);});a+=tx(30,236,msg('bucket.max'),'diagram-small diagram-mono');a+=box(30,263,890,66,msg('bucket.sequence', s.selected),st.map(t=>`Task${t.slot}: R${t.request} [${t.begin},${t.end})`).join(' → ')||msg('bucket.empty'),true);}
+      if(small){p.buckets.forEach((b,i)=>{const y=48+i*29;const active=i===s.selected;a+=tx(25,y+15,`CTA${i}`,'diagram-label diagram-mono')+rect(90,y,392,22,'var(--panel-2)','none',3);let offset=0;p.tasks.slice(b.begin,b.end).forEach(t=>{const w=(t.end-t.begin)*180;a+=rect(90+offset,y,w-2,22,rc(t.request),active?'var(--accent)':'none',3)+tx(90+offset+w/2,y+15,`T${t.slot} / R${t.request}`,'tile-label','text-anchor="middle"');offset+=w;});});a+=box(537,67,383,83,msg('bucket.order', s.selected),st.map(t=>`T${t.slot}`).join(' → ')||msg('bucket.empty'),true);a+=tx(554,184,msg('bucket.inside'),'diagram-title');[msg('bucket.readQ'),msg('bucket.readTiles'),msg('bucket.softmax'),msg('bucket.write')].forEach((t,i)=>a+=tx(554,213+i*25,t,'diagram-label'));}
+      else {const max=Math.max(...p.loads,1),left=30,pw=895;p.loads.forEach((v,i)=>{const x=left+i/p.ctas*pw,h=v/max*150;a+=rect(x,210-h,pw/p.ctas-1,h,'var(--accent)','none',1,`data-cta="${i}" data-tip="${esc(msg('bucket.ctaTip', i, v))}"`);});a+=tx(30,236,msg('bucket.max'),'diagram-small diagram-mono');a+=box(30,263,890,66,msg('bucket.sequence', s.selected),st.map(t=>`T${t.slot}: R${t.request} [${t.begin},${t.end})`).join(' → ')||msg('bucket.empty'),true);}
     } else {
       H=small?337:370;a+=tx(24,25,msg('bucket.mergeTitle'),'diagram-title');
       const show=small?[0,1,2,3]:[0,1,2,31];
-      show.forEach((r,k)=>{const y=48+k*69,range=p.requests[r];a+=box(25,y,128,48,`R${r}`,msg('bucket.taskCount', range.count),false);a+=path(`M153 ${y+24} H207`,true,id);const total=range.count;const showparts=Math.min(total,7);for(let j=0;j<showparts;j++)a+=rect(212+j*49,y+7,42,34,rc(r),'none',4)+tx(233+j*49,y+29,j===showparts-1&&total>7?'…':`P${j}`,'tile-label','text-anchor="middle"');a+=path(`M565 ${y+24} H627`,true,id)+box(633,y,135,48,'Last CTA',msg('bucket.byRequest'),true)+path(`M768 ${y+24} H814`,true,id)+box(820,y,112,48,`O_R${r}`,'6 × 256',true);});if(!small)a+=tx(26,353,msg('bucket.other'),'diagram-small');
+      show.forEach((r,k)=>{const y=48+k*69,range=p.requests[r];a+=box(25,y,128,48,`R${r}`,msg('bucket.taskCount', range.count),false);a+=path(`M153 ${y+24} H207`,true,id);const total=range.count;const showparts=Math.min(total,7);for(let j=0;j<showparts;j++)a+=rect(212+j*49,y+7,42,34,rc(r),'none',4)+tx(233+j*49,y+29,j===showparts-1&&total>7?'…':`P${j}`,'tile-label','text-anchor="middle"');a+=path(`M565 ${y+24} H627`,true,id)+box(633,y,135,48,msg('bucket.finalCTA'),msg('bucket.byRequest'),true)+path(`M768 ${y+24} H814`,true,id)+box(820,y,112,48,`O_R${r}`,'6 × 256',true);});if(!small)a+=tx(26,353,msg('bucket.other'),'diagram-small');
     }
     svg(id,a,W,H,msg('bucket.diagram'),animate);
     $('#bucket-diagram').onclick=e=>{const n=e.target.closest('[data-cta]');if(n){s.selected=+n.dataset.cta;renderBucket(true);}};
-    metrics('bucket-stats',[[msg('bucket.total'),p.total,'Tiles',msg('bucket.reqCount', p.lengths.filter(x=>x>0).length)],[msg('bucket.budget'),p.budget,'Tiles',msg('bucket.active', p.active)],[msg('bucket.slots'),p.tasks.length,'',msg('bucket.count', p.ctas)]]);
+    metrics('bucket-stats',[[msg('bucket.total'),p.total,msg('bucket.tileUnits'),msg('bucket.reqCount', p.lengths.filter(x=>x>0).length)],[msg('bucket.budget'),p.budget,msg('bucket.tileUnits'),msg('bucket.active', p.active)],[msg('bucket.slots'),p.tasks.length,'',msg('bucket.count', p.ctas)]]);
     const cross=st.length>1;
     const desc=[
       msg('bucket.requestsNote'),
@@ -377,10 +377,10 @@
 
   // ---------- Last-CTA reduction ----------
   let mergeStep=5;
-  function renderMerge(animate=false){const id='merge-diagram',order=[2,0,4,3,1],done=new Set(order.slice(0,mergeStep));steps('merge-steps',[msg('merge.start'),msg('merge.t2'),msg('merge.t0'),msg('merge.t4'),msg('merge.t3'),'T1 → Merge'],mergeStep,i=>{mergeStep=i;renderMerge(true);});let a='';
-    a+=tx(35,24,msg('merge.tasks'),'diagram-title')+tx(272,24,'Global Scratch','diagram-title')+tx(627,24,'Request R0','diagram-title');
-    for(let i=0;i<5;i++){const y=43+i*47,ok=done.has(i);a+=rect(26,y,148,33,ok?'var(--accent-soft)':'var(--panel-2)',ok?'var(--accent)':'var(--border)',5)+tx(100,y+21,`Task ${i} · ${ok?msg('merge.done'):msg('merge.running')}`,'diagram-label diagram-mono','text-anchor="middle"');a+=path(`M174 ${y+17} H253`,ok,id);a+=rect(260,y,202,33,ok?'var(--blue-soft)':'var(--panel-2)',ok?'var(--blue)':'var(--border)',5)+tx(361,y+21,ok?`O${i} · m${i} · l${i}`:msg('merge.wait'),'diagram-label diagram-mono','text-anchor="middle"');if(ok)a+=path(`M462 ${y+17} H540 V145 H600`,mergeStep===5,id);}
-    a+=box(603,115,160,62,mergeStep===5?'CTA of Task 1':msg('merge.counter'),mergeStep===5?msg('merge.winner'):`${mergeStep} / 5`,mergeStep===5);a+=path('M763 146 H798',mergeStep===5,id);a+=box(803,115,132,62,'O_R0',mergeStep===5?msg('merge.output'):msg('merge.pending'),mergeStep===5);
+  function renderMerge(animate=false){const id='merge-diagram',order=[2,0,4,3,1],done=new Set(order.slice(0,mergeStep));steps('merge-steps',[msg('merge.start'),msg('merge.t2'),msg('merge.t0'),msg('merge.t4'),msg('merge.t3'),msg('merge.lastStep')],mergeStep,i=>{mergeStep=i;renderMerge(true);});let a='';
+    a+=tx(35,24,msg('merge.tasks'),'diagram-title')+tx(272,24,msg('merge.scratch'),'diagram-title')+tx(627,24,msg('merge.request'),'diagram-title');
+    for(let i=0;i<5;i++){const y=43+i*47,ok=done.has(i);a+=rect(26,y,148,33,ok?'var(--accent-soft)':'var(--panel-2)',ok?'var(--accent)':'var(--border)',5)+tx(100,y+21,`${msg('bucket.task', i)} · ${ok?msg('merge.done'):msg('merge.running')}`,'diagram-label diagram-mono','text-anchor="middle"');a+=path(`M174 ${y+17} H253`,ok,id);a+=rect(260,y,202,33,ok?'var(--blue-soft)':'var(--panel-2)',ok?'var(--blue)':'var(--border)',5)+tx(361,y+21,ok?`O${i} · m${i} · l${i}`:msg('merge.wait'),'diagram-label diagram-mono','text-anchor="middle"');if(ok)a+=path(`M462 ${y+17} H540 V145 H600`,mergeStep===5,id);}
+    a+=box(603,115,160,62,mergeStep===5?msg('merge.lastCTA'):msg('merge.counter'),mergeStep===5?msg('merge.winner'):`${mergeStep} / 5`,mergeStep===5);a+=path('M763 146 H798',mergeStep===5,id);a+=box(803,115,132,62,'O_R0',mergeStep===5?msg('merge.output'):msg('merge.pending'),mergeStep===5);
     a+=tx(608,211,mergeStep===5?msg('merge.reweight'):msg('merge.order'),'diagram-small');a+=tx(608,239,mergeStep===5?msg('merge.reset'):msg('merge.publish'),'diagram-small');
     svg(id,a,960,300,msg('merge.diagram'),animate);
     const texts=[msg('merge.startNote'),msg('merge.t2Note'),msg('merge.t0Note'),msg('merge.t4Note'),msg('merge.t3Note'),msg('merge.t1Note')];
@@ -432,7 +432,7 @@
   function barline(name,value,width,baseline){return `<div class="barline"><span class="barname">${name}</span><div class="bartrack"><div class="barfill ${baseline?'baseline':''}" style="width:${Math.min(100,width)}%"></div></div><span class="barvalue">${value}</span></div>`;}
   function renderPrefill(){const max=Math.max(...data.prefill.map(r=>+r.cpp_ms));$('#prefill-chart').innerHTML=data.prefill.map(r=>{const c=+r.cpp_ms,v=+r.vpp_ms,rel=prefillMetric==='relative',scale=rel?c:max;return msg('chart.prefillRow', r.input_tokens==='131071'?'128K':(+r.input_tokens/1024)+'K', fmt((c-v)/c*100), barline('CPP',rel?'100.0%':fmt(c/1000,3)+' s',c/scale*100,true), barline('VPP',rel?fmt(v/c*100,1)+'%':fmt(v/1000,3)+' s',v/scale*100,false));}).join('');$$('#prefill-metric button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===prefillMetric)));}
   $('#prefill-metric').addEventListener('click',e=>{const b=e.target.closest('button[data-value]');if(b){prefillMetric=b.dataset.value;renderPrefill();}});
-  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'128K + 8 × 4K','128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
+  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'128K + 8 × 4K','128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline(msg('path.native'),fmt(n,2)+' ms',n/max*100,true)}${barline(msg('path.bucket'),fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
 
   renderPipe();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
   // Deterministic model functions are exposed for reproducibility and automated checks.

@@ -14,7 +14,7 @@
     const receiveTitle = local('H2D Stream', '接收流 H2D');
     const computeTitle = local('Compute Stream', '计算流');
     const sendTitle = local('D2H Stream', '发送流 D2H');
-    const computeBody = local('S1 / S6 · serial local stages', 'S1 / S6 · 本地阶段串行');
+    const computeBody = local('S1 / S6 · serial local stages', 'S1、S6 交替执行');
     const hostTitle = local('Host proxy thread', '主机代理线程');
     const hostBody = local('Event · READY / ACK', '事件 · READY / ACK');
     const slotTitle = index => local(`Slot ${index}`, `槽 ${index}`);
@@ -66,12 +66,12 @@
     const left = gpu.x + (narrow ? 24 : 16);
     const middle = narrow ? left : left + leftWidth + 18;
     const right = narrow ? left : middle + receiveWidth + 18;
-    const copy = local('GPU copy engine', 'GPU 复制引擎');
+    const copy = local('GPU copy engine', 'GPU 拷贝引擎');
     const h2d = geometry(left, narrow ? 194 : 146, leftWidth, heightFor(receiveTitle, copy, leftWidth));
     const receiveRow = Math.max(36, 12 + wrap(local('R0 · current input', '槽 0 · 当前输入'), receiveWidth - 40, 14).length * 18);
     const receive = geometry(middle, narrow ? h2d.bottom + 34 : 112, receiveWidth, 64 + receiveRow * 3 + 12);
     const compute = geometry(middle, receive.bottom + 36, receiveWidth, heightFor(computeTitle, computeBody, receiveWidth));
-    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '较早输出'), sourceWidth - 20));
+    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '上一块输出'), sourceWidth - 20));
     const source = geometry(right, narrow ? compute.bottom + 36 : 290, sourceWidth, 64 + sourceRow * 2 + 8 + 12);
     const d2h = geometry(right, narrow ? source.bottom + 36 : 146, sourceWidth, heightFor(sendTitle, copy, sourceWidth));
     gpu.h = (narrow ? d2h.bottom : Math.max(source.bottom, compute.bottom)) + 20 - gpu.y;
@@ -120,13 +120,13 @@
     drawing += frame(source.x, source.y, source.w, source.h, 'rt-arena rt-send');
     drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲'), source.w - 20, true);
     drawing += text(source.cx, source.y + 47, local('2 shared slots', '共享 2 个槽'), source.w - 20);
-    [local('Earlier output', '较早输出'), local('Current output', '当前输出')].forEach((label, index) => {
+    [local('Earlier output', '上一块输出'), local('Current output', '当前输出')].forEach((label, index) => {
       const y = source.y + 60 + index * (sourceRow + 8);
       drawing += `<g data-rank-slot="source-${index}">${box(source.x + 10, y, source.w - 20, sourceRow, `source-slot-${index}`, slotTitle(index), label, `rt-slot rt-${index ? 'compute' : 'send'}`)}</g>`;
     });
     drawing += box(hostBox.x, hostBox.y, hostBox.w, hostBox.h, 'host-proxy', hostTitle, hostBody, 'rt-host');
-    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 Rank 拓扑：共享缓冲与三条可并行的 CUDA Stream');
-    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'Forward 输入来自 GPU0，Return 输入来自 GPU2。H2D 写入共享的三个 Receive 槽，Compute 执行 S1 或 S6，两个 Source 槽经 D2H 发往 GPU2 或 GPU0。实线表示数据依赖，虚线连接 Host 控制；三条 Stream 可重叠处理不同 Chunk。');
+    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 的共享缓冲区和三条 CUDA 流');
+    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 从 GPU0 收到去程输入，从 GPU2 收到回程输入。接收流把数据写入三个共享槽，计算流执行 S1 或 S6，发送流把两个输出槽中的结果发往下一张卡。实线表示数据流向，虚线表示主机控制。三条流可以同时处理不同的块。');
     const defs = ['receive', 'compute', 'send', 'control'].map(role => `<marker id="${id}-${role}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8 Z" class="rt-arrow rt-${role}"/></marker>`).join('');
     const top = narrow ? 0 : 40;
     const height = Math.max(hostBox.bottom, ...outputs.map(endpoint => endpoint.bottom)) + 16 - top;

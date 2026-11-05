@@ -126,7 +126,7 @@ async function checkPage(browser, file, lang, otherPage) {
   try {
     await page.goto(url.href);
     assert.equal(await page.locator('html').getAttribute('lang'), lang);
-    assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Accelerating Qwen3.8 27B Inference on SM120' : '在 SM120 上加速千问3.8 27B 推理');
+    assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Accelerating Qwen3.8 27B Inference on SM120' : '千问3.8 27B 在 SM120 上的推理优化');
     assert.equal(await page.locator('.fusion-widget .sm-architecture svg').count(), 3);
     assert.equal(await page.locator('.reference-list li').count(), 16);
     await page.evaluate(checkModels);
