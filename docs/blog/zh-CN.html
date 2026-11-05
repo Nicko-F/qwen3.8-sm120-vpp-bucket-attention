@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
-<title>四张 RTX 5090 跑千问3.8 27B：从流水线调度到算子融合</title><meta name="description" content="四张 RTX 5090 上的千问3.8 27B 推理实测：折返流水线缩短长输入的预填充时间，KV 分桶均衡混合长度请求的解码负载，三个 CUDA 融合算子减少中间张量读写。">
+<title>SM120 × 千问3.8</title><meta name="description" content="四张 RTX 5090 上的千问3.8 27B 推理实测：折返流水线缩短长输入的预填充时间，KV 分桶均衡混合长度请求的解码负载，三个 CUDA 融合算子减少中间张量读写。">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="zh-CN" href="zh-CN.html">
 <script>
@@ -3065,7 +3065,7 @@ tbody tr:hover {
 <main id="article" tabindex="-1">
   <header class="hero" id="top">
     <div class="eyebrow"><span class="dot"></span> 推理优化笔记 <span class="eyebrow-line"></span> <time datetime="2026-11-05">2026.11.05</time></div>
-    <h1>四张 RTX 5090 <span class="title-phrase">跑<span class="hero-accent">千问3.8 27B</span>：</span><wbr><span class="title-phrase">从流水线调度</span><span class="title-phrase">到算子融合</span></h1>
+    <h1>SM120 × <span class="hero-accent">千问3.8</span></h1>
     <div class="hero-meta"><span>NICKO</span><span class="meta-divider">/</span><span>SM120 · vLLM · NVFP4</span></div>
   </header>
   <section class="prose intro" id="intro" aria-labelledby="abstract-heading">
