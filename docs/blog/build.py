@@ -38,10 +38,17 @@ def main():
 <html lang="{lang}" data-theme="light">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#ffffff">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
 <title>{title}</title><meta name="description" content="{description}">
 {alternates}
-<script>try{{document.documentElement.dataset.theme=localStorage.getItem('qwen-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}}catch(e){{}}</script>
+<script>
+(() => {{
+  let saved;
+  try {{ saved = localStorage.getItem('qwen-theme'); }} catch {{}}
+  const systemDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' ? saved : (systemDark ? 'dark' : 'light');
+}})();
+</script>
 <style>{css}</style>
 </head><body>{body}{json_script("benchmark-data", data)}{json_script("diagram-messages", messages)}
 <script>{js}</script></body></html>

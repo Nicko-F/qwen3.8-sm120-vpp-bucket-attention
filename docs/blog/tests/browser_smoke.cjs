@@ -92,7 +92,8 @@ async function checkPage(browser, file, lang, otherPage) {
     await page.goto(url.href);
     assert.equal(await page.locator('html').getAttribute('lang'), lang);
     assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Qwen3.8 27B' : '千问3.8 27B');
-    assert.equal(await page.locator('svg[role=img]').count(), 10);
+    assert.equal(await page.locator('svg[role=img]').count(), 7);
+    assert.equal(await page.locator('.fusion-widget .memory-map').count(), 3);
     assert.equal(await page.locator('.reference-list li').count(), 15);
     await page.evaluate(checkModels);
     await page.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
@@ -109,6 +110,9 @@ async function checkPage(browser, file, lang, otherPage) {
     for (const kind of ['norm', 'front', 'tail']) {
       for (const mode of ['before', 'after']) {
         await page.locator('#' + kind + '-widget button[data-mode=' + mode + ']').click();
+        const widget = page.locator('#' + kind + '-widget');
+        assert.equal(await widget.locator('.memory-hop').count(), mode === 'before' ? 4 : 3);
+        assert.equal(await widget.locator('.memory-saving').count(), mode === 'before' ? 0 : 1);
         await stepThrough(page, '#' + kind + '-widget .fusion-steps');
       }
     }
@@ -117,9 +121,20 @@ async function checkPage(browser, file, lang, otherPage) {
     await page.locator('#prefill-metric [data-value=relative]').click();
     assert.match(await page.locator('#prefill-chart').innerText(), /100\.0%/);
 
-    const initialTheme = await page.locator('html').getAttribute('data-theme');
+    const panel = page.locator('.trace-panel').first();
+    const traceColors = () => panel.evaluate(el => ({
+      background: getComputedStyle(el).backgroundColor,
+      lane: getComputedStyle(el.querySelector('rect')).fill,
+      label: getComputedStyle(el.querySelector('.track-label')).fill,
+    }));
+    await page.emulateMedia({ colorScheme: 'light' });
+    const lightTrace = await traceColors();
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    const darkTrace = await traceColors();
+    for (const key of Object.keys(lightTrace)) assert.notEqual(lightTrace[key], darkTrace[key], key + ' should follow the theme');
     await page.locator('#theme-toggle').click();
-    assert.notEqual(await page.locator('html').getAttribute('data-theme'), initialTheme);
+    assert.deepEqual(await traceColors(), lightTrace);
     for (const width of [320, 390, 650, 768, 1024, 1120, 1440, 1850, 1920]) {
       await page.setViewportSize({ width, height: 900 });
       const geometry = await page.evaluate(readingGeometry);

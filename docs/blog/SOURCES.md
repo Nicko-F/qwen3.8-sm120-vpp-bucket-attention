@@ -63,6 +63,7 @@ Task = request 区间与 Bucket 区间的交集
 - Front 图分别展示 Q/K 的 Norm → RoPE，以及 V 的量化写入路径。
 - Tail 图在最终 Attention 输出阶段执行 Gate 与 FP8，保留 Partial 合并格式。
 - 原生边界图按数据通路组织，Gate / Quant 等编译尾处理合并显示。
+- 图中按每卡、每 token 计算一次 BF16 中间张量写回和重读的逻辑字节数。Norm 的 y 为 2 × 5120 × 2 B = 20 KiB，Front 的旋转 K 为 2 × 256 × 2 B = 1 KiB/KV head，Tail 的最终 O 为 2 × 6 × 256 × 2 B = 6 KiB。缓存命中会影响实际 GDDR7 流量。
 - 对应源码：`nvfp4_norm_pack.cu`、`nvfp4_attention_front.cu`、`nvfp4_bucket_xqa.cu`、`xqa_task_impl.cuh`。
 
 ## 上游与参考阅读
