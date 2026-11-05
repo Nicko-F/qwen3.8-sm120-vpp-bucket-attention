@@ -1,0 +1,69 @@
+/* Data and control remain distinct; all three stream roles are visible together. */
+.rank-topology-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  font-family: var(--sans);
+}
+
+.rank-topology-svg .rt-heading {
+  fill: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rank-topology-svg .rt-label {
+  fill: var(--ink-2);
+  font-size: 14px;
+}
+
+.rank-topology-svg .rt-frame {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.rank-topology-svg .rt-gpu {
+  stroke: var(--muted);
+}
+
+.rank-topology-svg .rt-receive { --rt-color: var(--accent-strong); }
+.rank-topology-svg .rt-compute { --rt-color: var(--blue); }
+.rank-topology-svg .rt-send { --rt-color: var(--orange); }
+.rank-topology-svg .rt-control { --rt-color: var(--muted); }
+
+.rank-topology-svg .rt-stream {
+  fill: color-mix(in srgb, var(--rt-color) 12%, transparent);
+  stroke: var(--rt-color);
+  stroke-width: 1.6;
+}
+
+.rank-topology-svg .rt-arena {
+  stroke: var(--rt-color);
+}
+
+.rank-topology-svg .rt-slot {
+  fill: color-mix(in srgb, var(--rt-color) 7%, transparent);
+  stroke: color-mix(in srgb, var(--rt-color) 55%, var(--border));
+}
+
+.rank-topology-svg .rt-wire {
+  fill: none;
+  stroke: var(--rt-color);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.rank-topology-svg .rt-wire.rt-control {
+  stroke-width: 1.4;
+  stroke-dasharray: 4 5;
+}
+
+.rank-topology-svg .rt-arrow {
+  fill: var(--rt-color);
+}
+
+.rank-topology-svg .rt-host {
+  stroke-dasharray: 4 4;
+}

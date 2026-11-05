@@ -131,6 +131,14 @@ async function checkPage(browser, file, lang, otherPage) {
     assert.equal(await page.locator('.reference-list li').count(), 16);
     await page.evaluate(checkModels);
     await page.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
+    const rank = page.locator('#rank-figure');
+    const topology = rank.locator('button[aria-controls="rank-topology"]');
+    const snapshot = rank.locator('button[aria-controls="rank-diagram"]');
+    assert.equal(await topology.getAttribute('aria-pressed'), 'true');
+    await snapshot.click();
+    assert.equal(await rank.locator('.rank-lane:visible').count(), 3);
+    await topology.click();
+    assert.equal(await rank.locator('.rank-lane:visible').count(), 0);
     for (const selector of ['#pipe-count', '#pipe-growth', '#load-preset', '#bucket-preset']) {
       const select = page.locator(selector);
       for (const value of await select.locator('option').evaluateAll(options => options.map(o => o.value))) {

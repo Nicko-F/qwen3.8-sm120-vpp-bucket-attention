@@ -1041,6 +1041,8 @@ summary > span {
 }
 
 /* A rank-local snapshot shares one time marker across three independent streams. */
+#rank-figure [hidden] { display: none; }
+
 .rank-snapshot {
   margin-block: 8px 18px;
   font-size: 14px;
@@ -1391,15 +1393,6 @@ summary > span {
 
 .figure-explanation strong {
   color: var(--ink);
-}
-
-.figure-explanation .ex-label {
-  color: var(--accent-strong);
-  font-family: var(--sans);
-  font-size: 13px;
-  letter-spacing: .025em;
-  display: block;
-  margin-bottom: 5px;
 }
 
 .figure-metrics {

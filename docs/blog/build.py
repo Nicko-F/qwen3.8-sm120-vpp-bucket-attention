@@ -21,8 +21,8 @@ def json_script(name, data):
 
 
 def main():
-    css = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("styles.css", "sm.css"))
-    js = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("sm-diagram.js", "blog.js"))
+    css = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("styles.css", "sm.css", "rank-topology.css"))
+    js = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("sm-diagram.js", "rank-topology.js", "blog.js"))
     catalog = json.loads((SRC / "messages.json").read_text(encoding="utf-8"))
     data = {}
     for name in ("prefill", "decode", "http_fusion"):

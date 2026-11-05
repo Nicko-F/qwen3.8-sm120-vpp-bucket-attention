@@ -35,7 +35,6 @@
     if(keepFocus)el.querySelector(`button[data-step="${index}"]`)?.focus({preventScroll:true});
   }
   function metrics(holder,items){document.getElementById(holder).innerHTML=items.map(([l,v,u,n])=>`<div><small>${esc(l)}</small><strong>${esc(v)}${u?`<em>${esc(u)}</em>`:''}</strong>${n?`<span>${esc(n)}</span>`:''}</div>`).join('');}
-  function explanation(id,label,text){document.getElementById(id).innerHTML=`<span class="ex-label">${esc(label)}</span>${text}`;}
 
   // ---------- Reading UI ----------
   const themeBtn=$('#theme-toggle');
@@ -173,12 +172,39 @@
       msg('pipe.drainNote'),
       s.growth===0?msg('pipe.uniformNote'):msg('pipe.growthNote', fmt(cpp.finish), fmt(vpp.finish))
     ];
-    explanation('pipe-explanation',msg('pipe.phase', s.step+1),texts[s.step]);
+    $('#pipe-explanation').innerHTML = texts[s.step];
     metrics('pipe-metrics',[[msg('pipe.cppIdle'),fmt(cpp.idle),'u',msg('pipe.elapsed')],[msg('pipe.vppIdle'),fmt(vpp.idle),'u',msg('pipe.equalWork')],[msg('pipe.delta'),fmt((cpp.finish-vpp.finish)/cpp.finish*100,1)+'%','','tⱼ = 1 + '+s.growth+'j']]);
   }
   $('#pipe-count').addEventListener('change',e=>{pipeState.count=+e.target.value;if(pipeState.highlight>=pipeState.count)pipeState.highlight=-1;renderPipe(true);});
   $('#pipe-growth').addEventListener('change',e=>{pipeState.growth=+e.target.value;renderPipe(true);});
   $('#pipe-highlight').addEventListener('change',e=>{pipeState.highlight=+e.target.value;renderPipe(true);});
+
+  const rankViews = $('#rank-views');
+  const rankMap = $('#rank-topology');
+  const rankSnapshot = $('#rank-diagram');
+  let drawnRankWidth = 0;
+  function drawRankMap() {
+    const width = rankMap.clientWidth;
+    if (width && width !== drawnRankWidth) {
+      renderRankTopology(rankMap);
+      drawnRankWidth = width;
+    }
+  }
+  function selectRankView(id) {
+    rankMap.hidden = rankMap.id !== id;
+    rankSnapshot.hidden = rankSnapshot.id !== id;
+    for (const button of rankViews.querySelectorAll('button')) {
+      button.setAttribute('aria-pressed', String(button.getAttribute('aria-controls') === id));
+    }
+    drawRankMap();
+  }
+  rankViews.addEventListener('click', event => {
+    const button = event.target.closest('button[aria-controls]');
+    if (button) selectRankView(button.getAttribute('aria-controls'));
+  });
+  rankViews.hidden = false;
+  selectRankView(rankMap.id);
+  new ResizeObserver(drawRankMap).observe(rankMap);
 
   // ---------- Segmented DMA timeline ----------
   let dmaStep=3;
@@ -215,7 +241,7 @@
       msg('dma.pipelineNote'),
       msg('dma.receivedNote'),
       msg('dma.releaseNote')
-    ];explanation('dma-explanation',`HANDOFF ${dmaStep+1} / 6`,desc[dmaStep]);
+    ];$('#dma-explanation').innerHTML = desc[dmaStep];
   }
 
   // ---------- XQA task geometry: port of task_plan() interval mode ----------
@@ -343,7 +369,7 @@
       msg('bucket.packNote', p.budget, s.selected, st.length, cross?msg('bucket.cross'):msg('bucket.same')),
       msg('bucket.runNote'),
       msg('bucket.mergeNote')
-    ];explanation('bucket-explanation',`ASSIGN / COMPUTE · ${s.step+1} / 5`,desc[s.step]);
+    ];$('#bucket-explanation').innerHTML = desc[s.step];
     $('#bucket-task-table').innerHTML=msg('bucket.table')+p.tasks.map(t=>`<tr><td>T${t.slot}</td><td>R${t.request}</td><td>[${t.begin}, ${t.end})</td><td>${t.end-t.begin}</td><td>${t.bucket}</td></tr>`).join('')+'</tbody></table>';
   }
   $('#bucket-preset').addEventListener('change',e=>{bucketState.preset=e.target.value;bucketState.selected=bucketState.preset==='teaching'?4:85;renderBucket(true);});
@@ -358,7 +384,7 @@
     a+=tx(608,211,mergeStep===5?msg('merge.reweight'):msg('merge.order'),'diagram-small');a+=tx(608,239,mergeStep===5?msg('merge.reset'):msg('merge.publish'),'diagram-small');
     svg(id,a,960,300,msg('merge.diagram'),animate);
     const texts=[msg('merge.startNote'),msg('merge.t2Note'),msg('merge.t0Note'),msg('merge.t4Note'),msg('merge.t3Note'),msg('merge.t1Note')];
-    explanation('merge-explanation',`COMPLETE ${mergeStep} / 5`,texts[mergeStep]);
+    $('#merge-explanation').innerHTML = texts[mergeStep];
   }
 
   // ---------- Three consumer-format fusions ----------

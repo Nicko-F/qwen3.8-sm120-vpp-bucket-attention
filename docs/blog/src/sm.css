@@ -91,12 +91,6 @@
   fill: color-mix(in srgb, var(--purple) 32%, transparent);
 }
 
-.sm-path-caption {
-  fill: var(--accent-strong);
-  font-size: 14px;
-  font-weight: 500;
-}
-
 .sm-route {
   fill: none;
   stroke-width: 1.6;

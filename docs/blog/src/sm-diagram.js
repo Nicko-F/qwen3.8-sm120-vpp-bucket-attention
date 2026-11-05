@@ -206,10 +206,8 @@
     if (phase === 1 && !fused) drawing += route(`M${center - 6} ${gddr.y} V${memory.y + memory.h}`, 'native', false, 'is-conditional');
     drawing += text(center + 10, memory.y + memory.h + 26, local('Miss / eviction', '未命中 / 驱逐'), memory.w / 2 - 14, 'sm-small');
 
-    const captionY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
     const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', 'Gate：L2 → LD/ST → RF；最终 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
-    drawing += text(8, captionY, caption, width - 16, 'sm-path-caption');
-    const footerY = captionY + wrap(caption, width - 16, 14).length * 18 + 10;
+    const footerY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
     const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '输出写出')]];
     const columns = compact ? 2 : 4;
     const legendRowHeight = compact ? 42 : 24;

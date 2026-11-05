@@ -83,10 +83,6 @@
     "en": "In this model CPP finishes at <strong>{0} u</strong> and VPP at <strong>{1} u</strong>. The amount of compute is the same. Stage size and local execution order determine the difference.",
     "zh-CN": "当前模型中，CPP 完成于 <strong>{0} u</strong>，VPP 完成于 <strong>{1} u</strong>。总计算工作相同，差别来自 Stage 粒度与本地执行顺序。"
   },
-  "pipe.phase": {
-    "en": "Stage {0} / 6",
-    "zh-CN": "阶段 {0} / 6"
-  },
   "pipe.cppIdle": {
     "en": "CPP idle per GPU",
     "zh-CN": "CPP 每卡平均空闲"
