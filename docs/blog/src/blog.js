@@ -11,10 +11,10 @@
   const rc = (i) => colors[i % colors.length];
   const fmt = (n,d=2) => Number(n).toFixed(d);
   const tx = (x,y,s,cls='diagram-label',attrs='') => `<text x="${x}" y="${y}" class="${cls}" ${attrs}>${esc(s)}</text>`;
-  const rect = (x,y,w,h,fill='var(--panel-2)',stroke='var(--border)',r=5,attrs='') => `<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${h}" rx="${r}" fill="${fill}" stroke="${stroke}" ${attrs}/>`;
+  const rect = (x,y,w,h,fill='transparent',stroke='var(--border)',r=5,attrs='') => `<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${h}" rx="${r}" fill="${fill}" stroke="${stroke}" ${attrs}/>`;
   const path = (d,active=false,id='',attrs='') => `<path d="${d}" class="diagram-edge ${active?'active flow-active':''}" ${id?`marker-end="url(#${id}-arrow)"`:''} ${attrs}/>`;
   function box(x,y,w,h,title,subtitle='',active=false,extra='') {
-    return `<g ${extra}>${rect(x,y,w,h,active?'var(--accent-soft)':'var(--panel-2)',active?'var(--accent)':'var(--border)',7)}${tx(x+w/2,y+h/2+(subtitle?-3:5),title,'diagram-title','text-anchor="middle"')}${subtitle?tx(x+w/2,y+h/2+15,subtitle,'diagram-small','text-anchor="middle"'):''}</g>`;
+    return `<g ${extra}>${rect(x,y,w,h,active?'var(--accent-soft)':'transparent',active?'var(--accent)':'var(--border)',7)}${tx(x+w/2,y+h/2+(subtitle?-3:5),title,'diagram-title','text-anchor="middle"')}${subtitle?tx(x+w/2,y+h/2+15,subtitle,'diagram-small','text-anchor="middle"'):''}</g>`;
   }
   function svg(holder,inner,w,h,label,animate=false){
     const el=typeof holder==='string'?document.getElementById(holder):holder;
@@ -192,11 +192,11 @@
     a+=box(214,117,125,58,'H2D Stream',msg('rank.shared'),active(1));
     a+=rect(367,100,175,105,active(1)?'var(--accent-soft)':'var(--panel-2)',active(1)?'var(--accent)':'var(--border)',7);
     a+=tx(454,122,'Receive Arena','diagram-title','text-anchor="middle"');
-    [msg('rank.current'),msg('rank.ahead1'),msg('rank.ahead2')].forEach((t,i)=>{a+=rect(380,132+i*22,149,17,i===0?'var(--blue-soft)':'var(--panel)','var(--border)',3)+tx(454,144+i*22,t,'diagram-small diagram-mono','text-anchor="middle"');});
+    [msg('rank.current'),msg('rank.ahead1'),msg('rank.ahead2')].forEach((t,i)=>{a+=rect(380,132+i*22,149,17,i===0?'var(--blue-soft)':'transparent','var(--border)',3)+tx(454,144+i*22,t,'diagram-small diagram-mono','text-anchor="middle"');});
     a+=box(367,249,175,61,'Compute Stream',msg('rank.interleave'),active(2));
     a+=rect(581,230,151,88,active(3)?'var(--accent-soft)':'var(--panel-2)',active(3)?'var(--accent)':'var(--border)',7);
     a+=tx(656,251,'Source Arena','diagram-title','text-anchor="middle"');
-    a+=rect(592,264,62,37,'var(--panel)','var(--border)',4)+rect(660,264,62,37,'var(--panel)','var(--border)',4);
+    a+=rect(592,264,62,37,'transparent','var(--border)',4)+rect(660,264,62,37,'transparent','var(--border)',4);
     a+=tx(623,279,'Slot 0','diagram-small diagram-mono','text-anchor="middle"')+tx(623,293,msg('rank.sendPrev'),'diagram-small','text-anchor="middle"')+tx(691,279,'Slot 1','diagram-small diagram-mono','text-anchor="middle"')+tx(691,293,msg('rank.writeNext'),'diagram-small','text-anchor="middle"');
     a+=box(581,117,151,58,'D2H Stream',msg('rank.shared'),active(3));
     a+=box(795,92,150,66,msg('rank.to2'),'Forward / Edge1',active(3));a+=box(795,218,150,66,msg('rank.to0'),'Return / Edge6',active(3));
@@ -318,8 +318,8 @@
     drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
     svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
     metrics('load-metrics', [
-      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', `${native.splits} splits / padded request`],
-      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', `Budget = ${bucket.budget}`],
+      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', msg('load.splits', native.splits)],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', msg('load.budget', bucket.budget)],
       [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
     ]);
     const note = loadPreset === 'uniform'
@@ -399,28 +399,13 @@
   }
 
   // ---------- Three consumer-format fusions ----------
-  const fusionStates={norm:{mode:'after',step:2},front:{mode:'after',step:2},tail:{mode:'after',step:2}};
+  const fusionStates={norm:{mode:'after',step:1},front:{mode:'after',step:1},tail:{mode:'after',step:1}};
   function renderFusion(kind){
     const holder=$(`#${kind}-widget`),state=fusionStates[kind],after=state.mode==='after',step=state.step;
     const stageNames=kind==='norm'?[msg('fusion.readInput'),msg('fusion.normQuant'),msg('fusion.gemm')]:kind==='front'?[msg('fusion.readProj'),msg('fusion.qkv'),msg('fusion.store')]:[msg('fusion.final'),msg('fusion.gateQuant'),msg('fusion.project')];
     steps($('.fusion-steps',holder),stageNames,step,i=>{state.step=i;renderFusion(kind);});
     $$('.fusion-mode button',holder).forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode)));
-    const map = messages['memory.' + kind];
-    const node = ([title, detail]) =>
-      `<div class="memory-node"><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>`;
-    const rows = after ? ['load', 'local', 'output'] : ['load', 'store', 'reload', 'output'];
-    const route = rows.map(key => {
-      const [compute, memory] = map[key];
-      const stage = key === 'load' ? 0 : key === 'output' ? 2 : 1;
-      const active = stage === step ? ' current' : '';
-      if (key === 'local') {
-        return `<div class="memory-hop local${active}">${node(compute)}<p class="memory-saving">${esc(memory)}</p></div>`;
-      }
-      const write = key === 'store' || key === 'output';
-      const transfer = `<div class="memory-direction"><span aria-hidden="true">${write?'→':'←'}</span><span>${msg(write?'memory.store':'memory.load')}</span></div>`;
-      return `<div class="memory-hop${active}">${node(compute)}${transfer}${node(memory)}</div>`;
-    });
-    $('.memory-map', holder).innerHTML = `<div class="memory-head"><span>${msg('memory.sm')}</span><span>${msg('memory.global')}</span></div>` + route.join('');
+    renderSmDiagram($('.sm-architecture', holder), kind, after, step);
     const texts={
       norm:[
         msg('norm.inputNote'),
@@ -436,16 +421,29 @@
         after?msg('tail.outNote'):msg('tail.unfusedOut')
       ]
     };
-    $('.fusion-explanation',holder).innerHTML=`<span class="ex-label">${msg(after?'fusion.fused':'fusion.native')} · ${step+1} / 3</span>${texts[kind][step]}`;
+    $('.fusion-explanation',holder).innerHTML=texts[kind][step];
   }
   $$('.fusion-widget').forEach(h=>{const kind=h.dataset.kind;$('.fusion-mode',h).addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(b){fusionStates[kind].mode=b.dataset.mode;renderFusion(kind);}});});
+
+  const figureWidths = new WeakMap();
+  const resizeArchitecture = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      const width = Math.round(entry.contentRect.width);
+      if (!width || figureWidths.get(entry.target) === width) continue;
+      figureWidths.set(entry.target, width);
+      const kind = entry.target.closest('.fusion-widget').dataset.kind;
+      const state = fusionStates[kind];
+      renderSmDiagram(entry.target, kind, state.mode === 'after', state.step);
+    }
+  });
+  $$('.sm-architecture').forEach(host => resizeArchitecture.observe(host));
 
   // ---------- Measured benchmark charts ----------
   const data=JSON.parse($('#benchmark-data').textContent);let prefillMetric='relative';
   function barline(name,value,width,baseline){return `<div class="barline"><span class="barname">${name}</span><div class="bartrack"><div class="barfill ${baseline?'baseline':''}" style="width:${Math.min(100,width)}%"></div></div><span class="barvalue">${value}</span></div>`;}
   function renderPrefill(){const max=Math.max(...data.prefill.map(r=>+r.cpp_ms));$('#prefill-chart').innerHTML=data.prefill.map(r=>{const c=+r.cpp_ms,v=+r.vpp_ms,rel=prefillMetric==='relative',scale=rel?c:max;return msg('chart.prefillRow', r.input_tokens==='131071'?'128K':(+r.input_tokens/1024)+'K', fmt((c-v)/c*100), barline('CPP',rel?'100.0%':fmt(c/1000,3)+' s',c/scale*100,true), barline('VPP',rel?fmt(v/c*100,1)+'%':fmt(v/1000,3)+' s',v/scale*100,false));}).join('');$$('#prefill-metric button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===prefillMetric)));}
   $('#prefill-metric').addEventListener('click',e=>{const b=e.target.closest('button[data-value]');if(b){prefillMetric=b.dataset.value;renderPrefill();}});
-  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'B9 · 128K + 8 × 4K','B32 · 128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
+  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'≈128K + 8 × 4K','≈128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
 
   renderPipe();renderRank();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
   // Deterministic model functions are exposed for reproducibility and automated checks.

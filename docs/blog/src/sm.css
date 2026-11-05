@@ -1,0 +1,117 @@
+/* SM schematics share the page surface; only hardware roles and active paths use fills. */
+.sm-architecture {
+  --sm-load: var(--blue);
+  --sm-native: var(--orange);
+  --sm-fused: var(--accent-strong);
+  --sm-output: var(--purple);
+  width: 100%;
+  margin-block: 8px 16px;
+}
+
+.sm-architecture .sm-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--sans);
+  overflow: visible;
+}
+
+.sm-small {
+  font-size: 14px;
+  fill: var(--ink-2);
+}
+
+.sm-eyebrow {
+  font-size: 12px;
+  letter-spacing: .035em;
+  fill: var(--muted);
+}
+
+.sm-heading, .sm-phase {
+  font-size: 16px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+
+.sm-label {
+  font-size: 14px;
+  fill: var(--ink-2);
+}
+
+.sm-boundary, .sm-expanded, .sm-unit, .sm-register, .sm-partition {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.sm-boundary {
+  stroke: var(--muted);
+}
+
+.sm-expanded {
+  stroke-dasharray: 4 4;
+}
+
+.sm-partition.is-expanded, .sm-register.is-current {
+  fill: color-mix(in srgb, var(--accent) 7%, transparent);
+  stroke: var(--accent);
+}
+
+.sm-register-stripe {
+  fill: color-mix(in srgb, var(--purple) 24%, transparent);
+  stroke: none;
+}
+
+.sm-expansion {
+  fill: none;
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+.sm-shared, .sm-memory {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.sm-shared.is-current, .sm-unit.is-compute {
+  fill: color-mix(in srgb, var(--accent) 7%, transparent);
+  stroke: var(--accent);
+}
+
+.sm-unit.is-load { stroke: var(--sm-load); }
+.sm-unit.is-native { stroke: var(--sm-native); }
+.sm-unit.is-output { stroke: var(--sm-output); }
+
+.sm-cuda-lane {
+  fill: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.sm-tensor-tile {
+  fill: color-mix(in srgb, var(--purple) 32%, transparent);
+}
+
+.sm-path-caption {
+  fill: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sm-route {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  opacity: .22;
+}
+
+.sm-route.is-current { opacity: 1; }
+.sm-route.is-conditional { stroke-dasharray: 4 4; opacity: .65; }
+.sm-route.is-context { opacity: .22; }
+.sm-route.sm-load { stroke: var(--sm-load); }
+.sm-route.sm-native { stroke: var(--sm-native); }
+.sm-route.sm-fused { stroke: var(--sm-fused); }
+.sm-route.sm-output { stroke: var(--sm-output); }
+.sm-arrow-load { fill: var(--sm-load); }
+.sm-arrow-native { fill: var(--sm-native); }
+.sm-arrow-fused { fill: var(--sm-fused); }
+.sm-arrow-output { fill: var(--sm-output); }

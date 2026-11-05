@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
-<title>Qwen3.8 27B | From pipeline scheduling to CUDA kernel fusion</title><meta name="description" content="Interactive diagrams of folded VPP prefill, KV-length-aware decode and three CUDA kernel fusions on four RTX 5090 GPUs.">
+<title>Accelerating Qwen3.8 27B Inference on SM120</title><meta name="description" content="Interactive diagrams of folded VPP prefill, KV-length-aware decode and three CUDA kernel fusions on four RTX 5090 GPUs.">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="zh-CN" href="zh-CN.html">
 <script>
@@ -110,8 +110,8 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 18px;
-  line-height: 1.75;
+  font-size: 16px;
+  line-height: 1.625;
 }
 
 .article-shell {
@@ -127,6 +127,7 @@ body {
 #article {
   min-width: 0;
   padding: 0;
+  container: article / inline-size;
 }
 
 .prose, .wide {
@@ -136,8 +137,8 @@ body {
 }
 
 .prose p, .experiment-body p {
-  font-size: 18px;
-  line-height: 1.85;
+  font-size: 16px;
+  line-height: 1.625;
   color: var(--ink-2);
 }
 
@@ -180,20 +181,18 @@ summary:focus-visible,
 
 h1, h2, h3, h4 {
   color: var(--ink);
-  line-height: 1.4;
+  line-height: 1.35;
   margin: 0;
   font-weight: 600;
   text-wrap: pretty;
 }
 
 h2 {
-  font-size: 32px;
-  letter-spacing: -.015em;
+  font-size: 24px;
 }
 
 h3 {
-  font-size: 24px;
-  letter-spacing: -.01em;
+  font-size: 20px;
   margin: 2.25rem 0 1rem;
 }
 
@@ -241,7 +240,7 @@ pre code {
   line-height: 1.8;
 }
 
-.equation, .table-wrap, .svg-scroll, pre {
+.table-wrap, .svg-scroll, pre {
   overscroll-behavior-x: contain;
 }
 
@@ -551,18 +550,20 @@ summary > span {
 }
 
 .hero h1 {
-  font-size: 48px;
-  letter-spacing: -.025em;
+  text-wrap: balance;
+  font-size: 36px;
+  letter-spacing: 0;
   line-height: 1.25;
   font-weight: 600;
 }
 
 .hero-accent {
+  white-space: nowrap;
   color: var(--accent-strong);
 }
 
 .hero-subtitle {
-  font-size: 24px;
+  font-size: 18px;
   line-height: 1.5;
   letter-spacing: 0;
   font-weight: 400;
@@ -570,12 +571,6 @@ summary > span {
   color: var(--ink);
 }
 
-.hero-deck {
-  font-size: 18px;
-  line-height: 1.85;
-  color: var(--ink-2);
-  margin-bottom: 16px;
-}
 
 .hero-meta {
   display: flex;
@@ -628,6 +623,10 @@ summary > span {
   font-weight: 500;
 }
 
+.repo-symbol, .repo-arrow {
+  flex: none;
+}
+
 .repo-symbol {
   font-size: 23px;
   color: var(--accent);
@@ -673,15 +672,20 @@ summary > span {
 }
 
 .hero-results strong {
-  font-size: 32px;
+  font-size: 26px;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -.02em;
+  letter-spacing: normal;
   white-space: nowrap;
   font-weight: 600;
 }
 
-.hero-results strong span {
+.metric-range .dash {
+  margin-inline: .16em;
+  font-weight: 400;
+}
+
+.hero-results strong .unit {
   margin-inline-start: 2px;
   font-size: .63em;
   font-weight: 500;
@@ -793,94 +797,30 @@ summary > span {
 }
 
 .chapter-heading h2 {
-  font-size: 32px;
+  font-size: 24px;
 }
 
 /* Equations and the folded pipeline topology. */
 .equation {
-  background: none;
-  padding: 12px 4px;
-  margin: 24px 0 28px;
-  line-height: 2.1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .45em .3em;
+  margin: 1.2em 0 1.5em;
+  padding: .15em 0;
   color: var(--ink);
-  overflow: auto;
-  border-block: 0;
-  scrollbar-width: thin;
 }
 
-.equation > span {
+.equation math {
   font-family: var(--math);
-  font-size: 19px;
-  white-space: nowrap;
-  display: block;
-  width: max-content;
-  margin-inline: auto;
-}
-
-.equation small {
-  font-size: 15px;
-  color: var(--muted);
-  display: block;
-  margin-top: 14px;
-  line-height: 1.7;
-  text-align: start;
-}
-
-.equation.compact > span {
-  font-size: 19px;
-}
-
-.fraction {
-  display: inline-flex;
-  flex-direction: column;
-  text-align: center;
-  vertical-align: middle;
-  line-height: 1.4;
-  font-size: .88em;
-  padding: 0 4px;
-}
-
-.fraction > span:first-child {
-  border-bottom: 1px solid currentColor;
-  padding: 0 6px;
-}
-
-.fraction > span:last-child {
-  padding: 0 6px;
-}
-
-.sum {
-  display: inline-block;
-  position: relative;
-  font-size: 1.25em;
-  margin: 0 10px 0 8px;
-  line-height: 1.9;
-}
-
-.sum sub, .sum sup {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: .55em;
-}
-
-.sum sub {
-  bottom: .1em;
-}
-
-.sum sup {
-  top: .1em;
-}
-
-.paren {
-  font-size: 1.4em;
-  vertical-align: -.05em;
+  font-size: 1.08rem;
 }
 
 .topology {
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--panel);
+  background: transparent;
   padding: 18px;
   margin: 26px 0 30px;
   overflow-x: auto;
@@ -925,7 +865,7 @@ summary > span {
 }
 
 .topology-row.returning > span {
-  background: color-mix(in srgb, var(--purple) 12%, var(--panel));
+  background: color-mix(in srgb, var(--purple) 12%, transparent);
   color: var(--ink-2);
 }
 
@@ -938,17 +878,67 @@ summary > span {
   min-width: 620px;
 }
 
+@container article (max-width: 42rem) {
+  .topology {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 14px;
+    padding: 14px 12px;
+  }
+
+  .topology-row {
+    grid-row: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .topology-row.returning {
+    grid-column: 2;
+  }
+
+  .topology-row > span {
+    width: 100%;
+    padding: 8px 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .topology-row i {
+    line-height: 1;
+    transform: rotate(90deg);
+  }
+
+  .fold-arrow {
+    grid-area: 2 / 1 / 3 / -1;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .fold-arrow span {
+    display: inline-block;
+    transform: rotate(-90deg);
+  }
+}
+
 /* Article figures: flush headings/captions around bounded canvases. */
 .interactive, .data-figure {
-  background: var(--panel);
+  container: figure / inline-size;
+  background: transparent;
 }
 
 .figure-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.figure-header > div:not(.segmented) {
+  flex: 1 1 22rem;
+  overflow-wrap: anywhere;
 }
 
 .figure-kicker {
@@ -977,6 +967,8 @@ summary > span {
   color: var(--muted);
   white-space: normal;
   flex-shrink: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .figure-controls {
@@ -994,15 +986,17 @@ summary > span {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
   max-width: 100%;
 }
 
 .figure-controls select {
-  background: var(--panel);
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--ink);
   padding: 7px 28px 7px 10px;
+  min-width: 0;
   max-width: 100%;
   font-size: 14px;
   line-height: 1.5;
@@ -1029,16 +1023,18 @@ summary > span {
   gap: 7px;
   border: 1px solid var(--border);
   padding: 8px 12px;
-  background: var(--panel);
+  background: transparent;
   border-radius: 4px;
   font-size: 14px;
   line-height: 1.5;
   color: var(--ink-2);
   transition: background .18s, border-color .18s, color .18s;
   min-height: 44px;
+  min-width: 0;
   max-width: 100%;
   text-align: start;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .stepper button:hover {
@@ -1057,6 +1053,7 @@ summary > span {
   font-size: 12px;
   opacity: .7;
   font-variant-numeric: tabular-nums;
+  flex: none;
 }
 
 .trace-pair {
@@ -1066,10 +1063,9 @@ summary > span {
 }
 
 .trace-panel {
-  background: var(--trace-bg);
+  background: transparent;
   border: 1px solid var(--trace-grid);
   border-radius: 4px;
-  overflow: hidden;
   color: var(--trace-ink);
 }
 
@@ -1088,6 +1084,7 @@ summary > span {
   color: var(--trace-ink);
   gap: 4px 12px;
   flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 
 .trace-title b {
@@ -1112,7 +1109,7 @@ summary > span {
   scrollbar-width: thin;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--panel-2);
+  background: transparent;
 }
 
 .svg-scroll svg {
@@ -1155,6 +1152,8 @@ summary > span {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .key {
@@ -1163,6 +1162,7 @@ summary > span {
   height: 9px;
   border-radius: 2px;
   background: var(--trace-forward);
+  flex: none;
 }
 
 .key.returning {
@@ -1184,6 +1184,7 @@ summary > span {
   font-size: 16px;
   line-height: 1.8;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
 .figure-explanation strong {
@@ -1261,14 +1262,15 @@ summary > span {
 
 .segmented {
   display: flex;
-  flex-shrink: 0;
-  background: var(--panel-2);
+  flex: 0 1 auto;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px;
   gap: 2px;
   flex-wrap: wrap;
   max-width: 100%;
+  min-width: 0;
 }
 
 .segmented button {
@@ -1281,10 +1283,13 @@ summary > span {
   border-radius: 2px;
   white-space: normal;
   min-height: 40px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .segmented button[aria-pressed=true] {
-  background: var(--panel);
+  background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
@@ -1372,7 +1377,7 @@ summary > span {
 .deep-dive {
   margin: 2rem 0 1rem;
   border-block: 1px solid var(--border);
-  background: var(--panel);
+  background: transparent;
 }
 
 .deep-dive > summary, .experiment > summary {
@@ -1384,6 +1389,7 @@ summary > span {
   cursor: pointer;
   line-height: 1.6;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 summary::-webkit-details-marker {
@@ -1433,13 +1439,13 @@ summary small {
 }
 
 .details-body h3 {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .experiment {
   margin: 2rem 0 1rem;
   border-block: 1px solid var(--border);
-  background: var(--panel);
+  background: transparent;
 }
 
 .experiment > summary {
@@ -1461,7 +1467,7 @@ summary small {
 
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 0 24px;
   margin: 24px 0;
   padding: 4px 0;
@@ -1577,7 +1583,7 @@ tbody tr:hover {
 /* Supporting comparisons and data summaries. */
 .strategy-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 24px;
   margin: 28px 0 34px;
 }
@@ -1714,13 +1720,14 @@ tbody tr:hover {
 
 .fusion-result-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 24px;
   padding: 6px 0 24px;
 }
 
 .fusion-result-grid > div {
   min-width: 0;
+  overflow-wrap: anywhere;
   padding-block: 16px;
   border-top: 1px solid var(--border);
 }
@@ -1732,15 +1739,15 @@ tbody tr:hover {
 }
 
 .fusion-result-grid strong {
-  font-size: 30px;
-  letter-spacing: -.02em;
+  font-size: 26px;
+  letter-spacing: normal;
   display: block;
   margin: 8px 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.fusion-result-grid strong span {
+.fusion-result-grid strong .unit {
   font-size: 17px;
   color: var(--accent);
   margin-left: 3px;
@@ -1760,100 +1767,6 @@ tbody tr:hover {
   color: var(--accent-strong);
 }
 
-/* Fusion data paths keep the SM and global-memory columns visible together. */
-.fusion-diagram.memory-map {
-  overflow: visible;
-  padding: 16px 0;
-  border: 0;
-  border-block: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-}
-
-.memory-head, .memory-hop {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.5rem minmax(0, 1fr);
-  align-items: center;
-  gap: 16px;
-}
-
-.memory-head {
-  padding-bottom: 12px;
-  color: var(--ink-2);
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 600;
-}
-
-.memory-head > span:first-child {
-  grid-column: 1;
-}
-
-.memory-head > span:last-child {
-  grid-column: 3;
-}
-
-.memory-hop {
-  padding-block: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.memory-hop.current {
-  background: var(--accent-soft);
-}
-
-.memory-node, .memory-saving {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.memory-hop > .memory-node {
-  grid-column: 1;
-}
-
-.memory-hop > .memory-direction + .memory-node {
-  grid-column: 3;
-}
-
-.memory-node strong {
-  display: block;
-  color: var(--ink);
-  font-size: 17px;
-  line-height: 1.5;
-  font-weight: 600;
-}
-
-.memory-node small {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink-2);
-  font-size: 15px;
-  line-height: 1.7;
-}
-
-.memory-direction {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-strong);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.memory-direction > span:first-child {
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.memory-hop.local > .memory-saving {
-  grid-column: 2 / -1;
-  color: var(--ink-2);
-  font-size: 15px;
-  line-height: 1.75;
-}
-
 /* Closing text, sources, and article footer. */
 .closing {
   border-top: 1px solid var(--border);
@@ -1861,20 +1774,9 @@ tbody tr:hover {
   margin-top: 4rem;
 }
 
-.closing .eyebrow {
-  margin-bottom: 14px;
-}
-
 .closing h2 {
-  font-size: 30px;
+  font-size: 24px;
   margin-bottom: 24px;
-}
-
-.closing .closing-line {
-  font-size: 20px;
-  line-height: 1.7;
-  color: var(--ink);
-  margin: 28px 0;
 }
 
 .closing-repo {
@@ -1905,7 +1807,7 @@ tbody tr:hover {
 }
 
 .references h2 {
-  font-size: 26px;
+  font-size: 24px;
   margin-bottom: 16px;
 }
 
@@ -2056,7 +1958,7 @@ tbody tr:hover {
 }
 
 .diagram-node {
-  fill: var(--panel-2);
+  fill: none;
   stroke: var(--border);
   stroke-width: 1.2;
 }
@@ -2087,7 +1989,7 @@ tbody tr:hover {
 }
 
 .diagram-memory {
-  fill: color-mix(in srgb, var(--orange) 12%, var(--panel));
+  fill: color-mix(in srgb, var(--orange) 12%, transparent);
   stroke: var(--orange);
   stroke-width: 1;
 }
@@ -2260,20 +2162,16 @@ tbody tr:hover {
   }
 
   .hero h1 {
-    font-size: clamp(34px, 8.8vw, 44px);
-    letter-spacing: -.02em;
+    font-size: 30px;
+    letter-spacing: normal;
   }
 
   .hero-subtitle {
     margin: 14px 0 16px;
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1.5;
   }
 
-  .hero-deck {
-    line-height: 1.85;
-    font-size: 17px;
-  }
 
   .hero .eyebrow {
     gap: 8px;
@@ -2329,12 +2227,12 @@ tbody tr:hover {
   .hero-results strong {
     grid-column: 2;
     grid-row: 1 / span 2;
-    font-size: 30px;
+    font-size: 26px;
   }
 
   .prose p, .details-body .prose p, .experiment-body p {
-    line-height: 1.85;
-    font-size: 17px;
+    line-height: 1.625;
+    font-size: 16px;
   }
 
   .chapter-map {
@@ -2389,75 +2287,20 @@ tbody tr:hover {
   }
 
   .chapter-heading h2 {
-    font-size: 28px;
-    letter-spacing: -.01em;
+    font-size: 24px;
   }
 
   h3, .details-body h3 {
     margin-top: 28px;
-    font-size: 22px;
+    font-size: 20px;
   }
 
   /* Equations and the folded pipeline topology. */
-  .equation {
-    margin-block: 22px;
-    padding: 12px 2px;
-  }
-
-  .equation > span {
-    font-size: 18px;
-  }
-
-  .equation.compact > span {
-    font-size: 18px;
-  }
-
-  .topology {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px 14px;
-    padding: 14px 12px;
-  }
-
-  .topology-row {
-    grid-row: 1;
-    min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .topology-row.returning {
-    grid-column: 2;
-  }
-
-  .topology-row > span {
-    width: 100%;
-    padding: 8px 4px;
-  }
-
-  .topology-row i {
-    line-height: 1;
-    transform: rotate(90deg);
-  }
-
-  .fold-arrow {
-    grid-area: 2 / 1 / 3 / -1;
-    min-width: 0;
-    text-align: center;
-  }
-
-  .fold-arrow span {
-    display: inline-block;
-    transform: rotate(-90deg);
-  }
-
   figure {
     margin: 28px 0 34px;
   }
 
   .figure-header {
-    align-items: flex-start;
-    flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 14px;
   }
@@ -2477,10 +2320,6 @@ tbody tr:hover {
 
   .figure-controls label {
     gap: 6px;
-  }
-
-  .figure-controls select {
-    max-width: 100%;
   }
 
   .stepper {
@@ -2621,7 +2460,7 @@ tbody tr:hover {
 
   .fusion-result-grid strong {
     margin: 0;
-    font-size: 30px;
+    font-size: 26px;
   }
 
   .fusion-result-grid > div > span {
@@ -2635,11 +2474,7 @@ tbody tr:hover {
   }
 
   .closing h2 {
-    font-size: 27px;
-  }
-
-  .closing .closing-line {
-    font-size: 18px;
+    font-size: 24px;
   }
 
   .closing-repo {
@@ -2688,10 +2523,6 @@ tbody tr:hover {
     text-align: start;
   }
 
-  .memory-head, .memory-hop {
-    grid-template-columns: minmax(110px, 1fr) 2.5rem minmax(110px, 1fr);
-    gap: 6px;
-  }
 }
 
 @media (max-width:359px) {
@@ -2708,7 +2539,7 @@ tbody tr:hover {
   }
 
   .hero-results strong {
-    font-size: 28px;
+    font-size: 26px;
   }
 }
 
@@ -2741,7 +2572,7 @@ tbody tr:hover {
   body {
     background: #fff;
     color: #000;
-    font-size: 11pt;
+    font-size: 16px;
   }
 
   .site-header,
@@ -2821,6 +2652,124 @@ tbody tr:hover {
     font-size: 10pt;
   }
 }
+
+/* SM schematics share the page surface; only hardware roles and active paths use fills. */
+.sm-architecture {
+  --sm-load: var(--blue);
+  --sm-native: var(--orange);
+  --sm-fused: var(--accent-strong);
+  --sm-output: var(--purple);
+  width: 100%;
+  margin-block: 8px 16px;
+}
+
+.sm-architecture .sm-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--sans);
+  overflow: visible;
+}
+
+.sm-small {
+  font-size: 14px;
+  fill: var(--ink-2);
+}
+
+.sm-eyebrow {
+  font-size: 12px;
+  letter-spacing: .035em;
+  fill: var(--muted);
+}
+
+.sm-heading, .sm-phase {
+  font-size: 16px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+
+.sm-label {
+  font-size: 14px;
+  fill: var(--ink-2);
+}
+
+.sm-boundary, .sm-expanded, .sm-unit, .sm-register, .sm-partition {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.sm-boundary {
+  stroke: var(--muted);
+}
+
+.sm-expanded {
+  stroke-dasharray: 4 4;
+}
+
+.sm-partition.is-expanded, .sm-register.is-current {
+  fill: color-mix(in srgb, var(--accent) 7%, transparent);
+  stroke: var(--accent);
+}
+
+.sm-register-stripe {
+  fill: color-mix(in srgb, var(--purple) 24%, transparent);
+  stroke: none;
+}
+
+.sm-expansion {
+  fill: none;
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+.sm-shared, .sm-memory {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.sm-shared.is-current, .sm-unit.is-compute {
+  fill: color-mix(in srgb, var(--accent) 7%, transparent);
+  stroke: var(--accent);
+}
+
+.sm-unit.is-load { stroke: var(--sm-load); }
+.sm-unit.is-native { stroke: var(--sm-native); }
+.sm-unit.is-output { stroke: var(--sm-output); }
+
+.sm-cuda-lane {
+  fill: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.sm-tensor-tile {
+  fill: color-mix(in srgb, var(--purple) 32%, transparent);
+}
+
+.sm-path-caption {
+  fill: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sm-route {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  opacity: .22;
+}
+
+.sm-route.is-current { opacity: 1; }
+.sm-route.is-conditional { stroke-dasharray: 4 4; opacity: .65; }
+.sm-route.is-context { opacity: .22; }
+.sm-route.sm-load { stroke: var(--sm-load); }
+.sm-route.sm-native { stroke: var(--sm-native); }
+.sm-route.sm-fused { stroke: var(--sm-fused); }
+.sm-route.sm-output { stroke: var(--sm-output); }
+.sm-arrow-load { fill: var(--sm-load); }
+.sm-arrow-native { fill: var(--sm-native); }
+.sm-arrow-fused { fill: var(--sm-fused); }
+.sm-arrow-output { fill: var(--sm-output); }
 </style>
 </head><body><a class="skip-link" href="#article">Skip to article</a>
 <div class="reading-progress" aria-hidden="true"><span id="reading-progress"></span></div>
@@ -2835,16 +2784,15 @@ tbody tr:hover {
     <div class="hero-grid">
       <div class="hero-copy">
         <div class="eyebrow"><span class="dot"></span> ENGINEERING NOTES <span class="eyebrow-line"></span> 2026.11.05</div>
-        <h1>Qwen3.8 <span class="hero-accent">27B</span></h1>
-        <p class="hero-subtitle">From pipeline scheduling to CUDA kernel fusion</p>
-        <p class="hero-deck">Keep the pipeline moving across GPUs, balance work across SMs, and avoid extra VRAM round trips between kernels. An end-to-end inference optimization study of Qwen3.8-27B NVFP4.</p>
+        <h1>Accelerating <span class="hero-accent">Qwen3.8 27B</span> Inference on SM120</h1>
+        <p class="hero-subtitle">Folded pipelines for prefill, KV bucketing for decode, and three CUDA kernel fusions</p>
         <div class="hero-meta"><span>NICKO</span><span class="meta-divider">/</span><span>4 × RTX 5090</span><span class="meta-divider">/</span><span>SM120 · NVFP4</span></div>
         <a class="repo-card" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer"><span class="repo-symbol" aria-hidden="true">⌘</span><span><small>Source code and experiment data</small><strong>Nicko-F / qwen3.8-sm120-vpp-bucket-attention</strong></span><span class="repo-arrow" aria-hidden="true">↗</span></a>
       </div>
       <div class="hero-results">
-        <a href="#prefill-results"><small>PREFILL · FOUR-REQUEST BANK</small><strong>4.47–8.55<span>%</span></strong><span>Lower latency · vs. CPP</span></a>
-        <a href="#decode-results"><small>DECODE · B32 MIXED LENGTHS</small><strong>36.55<span>%</span></strong><span>Lower step latency · vs. native</span></a>
-        <a href="#fusion-results"><small>FUSION · FULL GPU CALL</small><strong>2.04–7.18<span>%</span></strong><span>Further latency reduction · vs. Bucket</span></a>
+        <a href="#prefill-results"><small>PREFILL · 4 REQUESTS</small><strong class="metric-range">4.47<span class="dash">–</span>8.55<span class="unit">%</span></strong><span>Lower latency · vs. CPP</span></a>
+        <a href="#decode-results"><small>DECODE · B32 MIXED LENGTHS</small><strong class="metric-range">36.55<span class="unit">%</span></strong><span>Lower step latency · vs. native</span></a>
+        <a href="#fusion-results"><small>FUSION · DECODE STEP</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>Further latency reduction · vs. Bucket</span></a>
       </div>
     </div>
   </section>
@@ -2864,12 +2812,12 @@ tbody tr:hover {
     <div class="prose" id="prefill-cost">
       <h3>Equal-sized chunks do not cost the same</h3>
       <p>Chunked prefill divides a long prompt into segments, each adding <i>C</i> tokens. Linear projections and MLPs see roughly the same input size, but full attention sees a growing history: the first chunk starts from zero, while later chunks must also access previously accumulated KV.</p>
-      <p>Let <i>j</i> be the chunk index and <i>H<sub>j</sub></i> its history length at the start. For causal attention, the number of valid Q–K pairs for this chunk is:</p>
-      <div class="equation"><span>A<sub>j</sub> = <span class="sum">∑<sub>i=1</sub><sup>C</sup></span> (H<sub>j</sub> + i) = CH<sub>j</sub> + <span class="fraction"><span>C(C + 1)</span><span>2</span></span></span><small>Each new query attends to historical KV and the tokens already present in the current chunk.</small></div>
-      <p>In Qwen's hybrid architecture, GDN, projections, and MLPs contribute work approximately linear in <i>C</i>, while full attention adds the history-dependent term above. We can therefore model one physical stage's runtime as:</p>
-      <div class="equation"><span>t<sub>j</sub> = aC + b<span class="paren">(</span>CH<sub>j</sub> + <span class="fraction"><span>C(C + 1)</span><span>2</span></span><span class="paren">)</span> + c</span><small>a: linear compute cost　b: cost per full-attention pair　c: fixed overhead</small></div>
-      <p>With a fixed chunk size, <i>H<sub>j+1</sub> − H<sub>j</sub> = C</i>, so the cost increase between adjacent chunks is <strong>bC²</strong>. Compute blocks in the timeline therefore become longer. Conventional PP also requires each chunk to pass through every stage in order: a downstream GPU can proceed only after its predecessor produces the input.</p>
-      <div class="equation compact"><span>F<sub>s,j</sub> = max(F<sub>s−1,j</sub>, F<sub>s,j−1</sub>) + t<sub>j</sub></span><small>A stage starts when both its input has arrived and its previous local computation has finished.</small></div>
+      <p>Chunk <i>j</i> starts with <i>H<sub>j</sub></i> cached tokens. Its first query attends to those tokens and itself. Its last query sees all <i>C</i> new tokens as well. Summing these lengths gives the number of query–key pairs, <i>A<sub>j</sub></i>.</p>
+      <div class="equation"><math display="block"><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>C</mi></munderover><mrow><mo>(</mo><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>i</mi><mo>)</mo></mrow></math><math display="block"><mo>=</mo><mi>C</mi><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mfrac><mrow><mi>C</mi><mrow><mo>(</mo><mi>C</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow></mrow><mrow><mn>2</mn></mrow></mfrac></math></div>
+      <p>For one pipeline stage, let <i>a</i> be the per-token cost of GDN, projections and MLPs, <i>b</i> the attention cost per query–key pair, and <i>c</i> the fixed cost per chunk. This gives a simple stage-time model.</p>
+      <div class="equation"><math display="block"><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><mi>a</mi><mi>C</mi><mo>+</mo><mi>b</mi><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>c</mi></math></div>
+      <p>Each chunk adds <i>C</i> tokens of history, so the next chunk takes about <strong>bC²</strong> longer on a stage. In conventional pipeline parallelism (CPP), stage <i>s</i> can start chunk <i>j</i> once its input arrives and the previous chunk has freed the stage. Its finish time is the later of those two events plus its own compute time.</p>
+      <div class="equation"><math display="block"><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>−</mo><mn>1</mn><mo>,</mo><mi>j</mi></mrow></msub><mo>,</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>)</mo></mrow><mo>+</mo><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub></math></div>
       <p>In a model with equally fast stages and monotonically increasing chunk costs, the completion time for <i>P</i> stages is <strong>Σt<sub>j</sub> + (P−1)t<sub>N</sub></strong>. With four GPUs, the tail is equivalent to three additional stage executions of the longest chunk. This fill-and-drain overhead becomes more pronounced as context grows.</p>
     </div>
     <div class="prose" id="prefill-fold">
@@ -2888,21 +2836,21 @@ tbody tr:hover {
       <div class="figure-legend"><span><i class="key compute"></i>CPP / Forward</span><span><i class="key returning"></i>Return</span><span><i class="key idle"></i>Idle</span><span><i class="key cursor"></i>Current time</span></div>
       <div class="figure-explanation" id="pipe-explanation" aria-live="polite"></div>
       <div class="figure-metrics" id="pipe-metrics"></div>
-      <figcaption>Modeled schedules with the same chunks, layer count, and cumulative compute. Each virtual stage costs half a physical stage. Normalized timelines follow data dependencies and local execution order. Select a phase to inspect filling, turnaround, and draining.</figcaption>
+      <figcaption>Each row is one GPU. Blue blocks follow the forward path, purple blocks the return. Horizontal gaps are idle time.</figcaption>
     </figure>
 
     <div class="prose" id="prefill-results">
       <h3>From modeled timelines to four-GPU measurements</h3>
-      <p>A full prefill bank contains four requests, each generating one token. Across 8K–128K inputs, the best VPP configurations reduce bank latency by <strong>4.47%–8.55%</strong>; at 32K, runtime falls from <strong>4.304 s to 3.936 s</strong>.<a class="ref" href="#ref-8">[8]</a></p>
+      <p>We time four prompts together, from prefill through the first output token for each request. Across 8K–128K inputs, the best VPP configurations reduce the time for all four requests by <strong>4.47%–8.55%</strong>; at 32K, runtime falls from <strong>4.304 s to 3.936 s</strong>.<a class="ref" href="#ref-8">[8]</a></p>
     </div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / PREFILL P+1</div><h4>Full-bank latency for long-context prefill</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="Prefill chart units"><button data-value="relative" aria-pressed="true">Relative time</button><button data-value="absolute" aria-pressed="false">Absolute time</button></div></div><div id="prefill-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP1/PP4 · Best configuration from each method's sweep at each input length · Median of three timed banks. <a href="#ref-8">Data source ↗</a></figcaption></figure>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / PREFILL</div><h4>Time to prefill four long prompts</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="Prefill chart units"><button data-value="relative" aria-pressed="true">Relative time</button><button data-value="absolute" aria-pressed="false">Absolute time</button></div></div><div id="prefill-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP1/PP4 · Best configuration from each method's sweep at each input length · Median of three runs. <a href="#ref-8">Data source ↗</a></figcaption></figure>
     <div class="prose"><p>The gain depends on having work in flight. Four requests supply enough chunks to interleave; with only one 8K request, CPP and VPP take 304.6 ms and 311.0 ms, respectively. As the number of requests and context length grow, VPP's reorganization of filling and draining begins to pay off.</p></div>
 
     <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: connecting compute and communication within a rank</strong><small>Shared buffers · CUDA streams · Segmented DMA · vLLM integration</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
       <div class="prose"><h3>Serial compute, asynchronous input and output preparation</h3><p>Each rank owns both a forward and a return layer segment. Compute queues on one main stream; D2H and H2D each use a separate stream. Both directions share two source slots and three receive slots. While one output is being sent, the next uses the other source slot; while compute consumes one input, the other two receive slots can prepare upcoming inputs.<a class="ref" href="#ref-9">[9]</a></p></div>
-      <figure class="interactive nested" id="rank-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>One compute stream, five shared data buffers</h4></div><span class="figure-tag">C = 8192</span></div><div class="stepper" id="rank-steps" role="group" aria-label="Inspect rank resources"></div><div id="rank-diagram" class="svg-scroll"></div><div class="figure-explanation" id="rank-explanation" aria-live="polite"></div><figcaption>Each device slot holds hidden states + residuals: 8192 × 5120 × 2 × 2 B = 160 MiB. Fixed communication buffers total 5 × 160 = 800 MiB per rank; each communication edge has its own host ring.</figcaption></figure>
+      <figure class="interactive nested" id="rank-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>One compute stream, five shared data buffers</h4></div><span class="figure-tag">8K tokens / chunk</span></div><div class="stepper" id="rank-steps" role="group" aria-label="Inspect rank resources"></div><div id="rank-diagram" class="svg-scroll"></div><div class="figure-explanation" id="rank-explanation" aria-live="polite"></div><figcaption>Two send slots and three receive slots share the same GPU. Each holds 160 MiB of hidden states and residuals at an 8K chunk size.</figcaption></figure>
       <div class="prose"><p>The pipeline window <code>W=7</code> tracks batches concurrently advancing through the model. Source and receive slots instead follow data lifetimes: a source slot is released after D2H finishes reading it, and a receive slot after its last local stage consumer finishes. Forward and return keep distinct sequence numbers and event identities while sharing the physical data buffers.</p><p>Cross-GPU data travels through <strong>GPU VRAM → registered host ring → downstream GPU VRAM</strong>. The RTX 5090 uses GDDR7 device memory. Each edge's host ring contains 8 segments of 16 MiB. A 160 MiB stage-boundary payload is split into 10 segments; once the receiver finishes reading an earlier segment, the sender can reuse that ring position.</p></div>
-      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 04 / TRANSFER HANDOFF</div><h4>Queue the next transfer early</h4></div><span class="figure-tag">Stream / Event</span></div><div class="stepper" id="dma-steps" role="group" aria-label="Select a DMA phase"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>Schematic segment transfers and event dependencies in relative time. Orange: D2H. Teal: H2D. Dashed lines connect transfer completion events to dependent work.</figcaption></figure>
+      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 04 / TRANSFER HANDOFF</div><h4>Queue the next transfer early</h4></div><span class="figure-tag">Stream / Event</span></div><div class="stepper" id="dma-steps" role="group" aria-label="Select a DMA phase"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>Orange segments move from GPU to host. Teal segments move from host to GPU. Dashed lines show which completion event releases the next transfer.</figcaption></figure>
       <div class="prose"><p>A C++ progress thread on each rank advances this path. The producer records an output-ready event. The CPU queues D2H and its completion event on the send stream, then publishes READY in shared memory. Upon seeing READY, the receiver queues both an event wait and the following H2D on its receive stream. When the upstream transfer finishes, the downstream copy engine already has work queued.</p><p>The H2D completion event releases the host segment; the full-input receive event connects to the compute stream; the consumer event recorded after stage execution releases the receive slot. These three completion conditions match three actual data lifetimes, allowing communication and compute to advance independently.</p>
       <div class="code-block"><div class="code-heading">Execution outline / pseudocode</div><pre><code>for (batch, stage) in local_stage_order:
     prefetch_ready_inputs()           # At most one unconsumed prefetch per direction
@@ -2918,9 +2866,9 @@ tbody tr:hover {
 # Host-side events release credits.</code></pre></div>
       <p>In vLLM, the executor submits batches and continuations, the worker chooses stages from its local queue, and the runner selects the corresponding layers and binds their inputs and outputs. Depending on the execution path, producers may bind the source slot as their output or copy captured graph outputs into it before publishing readiness. vLLM retains model computation and sampling; the communication layer connects adjacent stages' data dependencies. VPP scheduling and DMA execution therefore have separate, explicit responsibilities.</p></div>
       <details class="experiment" id="prefill-experiment"><summary><span class="detail-icon">＋</span><span><strong>Experiment configuration, full results, and model derivation</strong><small>Configuration sweep · One / four requests · Cost model</small></span></summary><div class="experiment-body prose">
-        <div class="config-grid"><div><small>Devices / parallelism</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>Data types</small><strong>NVFP4 KV · BF16 Hidden</strong></div><div><small>Workload</small><strong>Four-request P+1 · 8K–128K</strong></div><div><small>Statistics</small><strong>Three timings per point · Median</strong></div></div>
-        <p>The sweep covers CPP C2K/4K/8K/16K, VPP C2K/4K/8K, and DCPP reference configurations: 20 configurations, 160 shape/configuration points, and 480 timed banks. It includes Graph Off and Piecewise Graph, with an 8 GiB KV budget per rank. MTP and prefix caching are disabled. Sampling uses temperature 0.7 and top-p 0.9.</p>
-        <div class="table-wrap"><table><thead><tr><th>Input tokens / request</th><th>CPP ms</th><th>VPP ms</th><th>VPP configuration</th><th>Latency reduction</th></tr></thead><tbody><tr><td>8,192</td><td>832.413</td><td>795.197</td><td>C2048 / Piecewise</td><td>4.47%</td></tr><tr><td>32,768</td><td>4,304.359</td><td>3,936.227</td><td>C4096 / Piecewise</td><td>8.55%</td></tr><tr><td>65,536</td><td>11,647.508</td><td>10,834.357</td><td>C4096 / Piecewise</td><td>6.98%</td></tr><tr><td>131,071</td><td>35,241.058</td><td>33,410.873</td><td>C8192 / Graph Off</td><td>5.19%</td></tr></tbody></table></div>
+        <div class="config-grid"><div><small>Devices / parallelism</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>Data types</small><strong>NVFP4 KV · BF16 Hidden</strong></div><div><small>Workload</small><strong>4 requests · 8K–128K each</strong></div><div><small>Statistics</small><strong>Three timings per point · Median</strong></div></div>
+        <p>The sweep covers CPP C2K/4K/8K/16K, VPP C2K/4K/8K, and DCPP reference configurations: 20 configurations, 160 shape/configuration points, and 480 timed runs. It includes Graph Off and Piecewise Graph, with an 8 GiB KV budget per rank. MTP and prefix caching are disabled. Sampling uses temperature 0.7 and top-p 0.9.</p>
+        <div class="table-wrap"><table><thead><tr><th>Input tokens / request</th><th>CPP ms</th><th>VPP ms</th><th>VPP configuration</th><th>Latency reduction</th></tr></thead><tbody><tr><td>8K</td><td>832.413</td><td>795.197</td><td>2K chunk · piecewise graph</td><td>4.47%</td></tr><tr><td>32K</td><td>4,304.359</td><td>3,936.227</td><td>4K chunk · piecewise graph</td><td>8.55%</td></tr><tr><td>64K</td><td>11,647.508</td><td>10,834.357</td><td>4K chunk · piecewise graph</td><td>6.98%</td></tr><tr><td>≈128K</td><td>35,241.058</td><td>33,410.873</td><td>8K chunk · graph off</td><td>5.19%</td></tr></tbody></table></div>
         <h4>Why does PP add (P−1)t<sub>N</sub>?</h4><p>Assume equally fast stages and nondecreasing <i>t<sub>j</sub></i>. Induction on the recurrence gives <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>. Upstream input completion exceeds completion of the preceding local item by <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>, so taking the maximum yields this expression. Setting <i>s=P, j=N</i> gives the total completion time.</p><p>The gap between adjacent chunks on stage <i>s</i> is <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>. For fixed-size chunks, the cost increment is approximately constant. As the input grows, the longest chunk continues to grow, increasing the total fill-and-drain term. VPP rearranges these dependencies through finer stages and a folded order. The page's modeled timelines follow the same dependency recurrence.</p>
         <p class="source-line">Results: <a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/prefill.csv" target="_blank" rel="noopener">prefill.csv ↗</a>　Implementation: <a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/vpp/layout.py" target="_blank" rel="noopener">layout.py ↗</a>　Communication: <a href="#ref-9">VPP communication [9]</a></p>
       </div></details>
@@ -2930,14 +2878,14 @@ tbody tr:hover {
   <section class="chapter" id="decode">
     <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">DECODE / KV WORK PARTITIONING</div><h2>Assigning CTAs by KV workload</h2></div></div>
     <div class="prose" id="decode-load"><h3>One output token, tens of times more work</h3><p>Decode queries are short: each request advances by just one token. Attention mainly reads historical KV and performs QK, softmax, and PV. Within the same layer and head shape, KV length is a direct measure of work.</p><p>In this Qwen3.8 NVFP4 TP4 deployment, each GPU's full-attention shard has 6 Q heads, 1 KV head, and head dimension 256. Native FlashInfer XQA organizes Split-KV parallelism for requests. When one request approaches 128K and the others are 4K, assigning the same split count to every request creates markedly uneven CTA workloads.<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>Consider B32 with a budget of 170 CTAs: about 5 splits per request. The long request has 511 tiles of 256 tokens, so its heaviest CTA processes 103 tiles. A short request has only 16 tiles, with about 4 in its heaviest split. After most CTAs finish, a few long splits remain on attention's critical path.</p></div>
-    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 05 / CTA WORKLOAD</div><h4>Plotting the work assigned to each CTA</h4></div><span class="figure-tag">KV Tiles / CTA</span></div><div class="figure-controls"><label>Request distribution <select id="load-preset"><option value="skew32">B32 · 130816 + 31 × 4096</option><option value="skew9">B9 · 130816 + 8 × 4096 (16 rows)</option><option value="uniform">B32 · All 8064</option></select></label><span class="control-hint">170-CTA budget · 256 tokens per tile</span></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>Modeled workloads: bar height is the number of assigned KV tiles. Top: uniform split counts. Bottom: the current bucket formula. The CTA budget matches the device's SM count.</figcaption></figure>
+    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 05 / CTA WORKLOAD</div><h4>Plotting the work assigned to each CTA</h4></div><span class="figure-tag">KV Tiles / CTA</span></div><div class="figure-controls"><label>Request distribution <select id="load-preset"><option value="skew32">One ~128K + 31 × 4K</option><option value="skew9">One ~128K + 8 × 4K</option><option value="uniform">32 requests · ≈8K each</option></select></label><span class="control-hint">170-CTA budget · 256 tokens per tile</span></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>One bar per CTA. Both plots use the same vertical scale, in tiles of 256 tokens.</figcaption></figure>
     <div class="prose" id="split-strategies"><h3>Split-KV addresses the same problem, with a different grouping of work</h3><p>FlashAttention-3's variable-length Split-KV path first totals Q/KV work across the batch, estimates a suitable workload per split, and then computes each request's split count. Long requests receive more splits and short requests fewer. Each split handles a contiguous KV range within one request, writes a partial output and LogSumExp, and is later merged by a combine kernel.<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4's SM100/SM103 Split-KV path also provides per-request split metadata, factoring query/head parallelism, KV length, and hardware capacity into configuration. Scheduling strategies such as LPT further order work so heavier items run earlier. These designs address the same question: how can the current batch's attention workload use the GPU more fully?<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>Tencent HPC-Ops takes a more explicitly batch-wide approach: concatenate requests' KV work onto one axis, then partition it by the CTA budget. After finishing one request's tail, a bucket can continue with the next request's beginning. This is the approach adapted here: <strong>use HPC-Ops global KV partitioning with FlashInfer XQA as the NVFP4 compute body on SM120.</strong><a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
       <div class="strategy-cards"><div><small>ADAPTIVE SPLIT-KV</small><strong>Choose a split count for each request</strong><p>Compute split counts from lengths; each split handles one KV range within its request.</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>GLOBAL KV BUCKET</small><strong>Choose a workload for each CTA</strong><p>Fill balanced buckets across request boundaries; one CTA may execute several tasks in sequence.</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
-      <h3>Tile, task, bucket: three units, one execution path</h3><p>This XQA adaptation uses <strong>256 KV tokens</strong> per tile. A task is a contiguous tile range within one request; a bucket collects the tasks assigned to one CTA. For request <i>i</i>, first compute <i>n<sub>i</sub> = ⌈L<sub>i</sub>/256⌉</i>, then derive the budget per bucket:</p>
-      <div class="equation"><span>B = max<span class="paren">(</span>2, ⌈<span class="fraction"><span>Σ<sub>i</sub> n<sub>i</sub></span><span>N<sub>CTA</sub></span></span>⌉<span class="paren">)</span><small>Fill buckets with requests' tiles in order, creating a new task at each request boundary.</small></div>
-      <p>In the B32 example above, the total workload is <i>511 + 31 × 16 = 1007</i> tiles, giving a bucket budget of 6. The long request is spread across more CTAs, and a short request's boundary can share a bucket with its neighbor. A GPU assign kernel generates the mapping once per decode step; compatible full-attention layers reuse it.<a class="ref" href="#ref-7">[7]</a></p>
+      <h3>Tile, task, bucket: three units, one execution path</h3><p>A <strong>tile</strong> holds up to 256 KV tokens. To get the tile count <i>n<sub>i</sub></i> for request <i>i</i>, divide its length by 256 and round up. A <strong>task</strong> covers consecutive tiles from one request. A <strong>bucket</strong> holds the tasks assigned to one CTA. We add the tile counts, divide by the number of CTAs, then round up to get the target bucket size, with a minimum of two tiles.</p>
+      <div class="equation"><math display="block"><mi>B</mi><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><mn>2</mn><mo>,</mo><mo>⌈</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>n</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><msub><mi>N</mi><mtext>CTA</mtext></msub></mrow></mfrac><mo>⌉</mo><mo>)</mo></mrow></math></div>
+      <p>In the B32 example above, the total workload is <i>511 + 31 × 16 = 1007</i> tiles, giving a bucket budget of 6. Fill each bucket in request order. If it crosses a request boundary, start a new task in the same bucket. A GPU assign kernel generates the mapping once per decode step; compatible full-attention layers reuse it.<a class="ref" href="#ref-7">[7]</a></p>
     </div>
-    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 06 / ASSIGN → COMPUTE</div><h4>From requests to CTA work, step by step</h4></div><span class="figure-tag">Runtime task tables</span></div><div class="figure-controls"><label>Example <select id="bucket-preset"><option value="teaching">4 requests / 8 CTAs · 9, 3, 2, 1 tiles</option><option value="real">B32 / 170 CTA · 128K + 31 × 4K</option></select></label><label>Track CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="Select a bucketing phase"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>Inspect the current task table</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>Tasks are described by (request, begin_tile, end_tile, stride). A bucket references a contiguous range in the task table; each task retains its request identity and partial-output location.</figcaption></figure>
+    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 06 / ASSIGN → COMPUTE</div><h4>From requests to CTA work, step by step</h4></div><span class="figure-tag">Runtime task tables</span></div><div class="figure-controls"><label>Example <select id="bucket-preset"><option value="teaching">4 requests / 8 CTAs · 9, 3, 2, 1 tiles</option><option value="real">32 requests · ≈128K + 31 × 4K</option></select></label><label>Track CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="Select a bucketing phase"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>Inspect the current task table</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>A color identifies a request. A change of color inside a bucket marks the start of another task.</figcaption></figure>
     <div class="prose"><p>Compute launches a fixed-size CTA grid. Each CTA reads its bucket and executes the tasks in sequence. A task iterates over its KV tiles, updates online softmax state, and writes one partial result when done. At a request boundary, the CTA reuses its compute resources and initializes fresh state for the next task.</p><p>This preserves XQA's KV loading, QK/PV, and softmax dataflow while shifting from a fixed split count per request to an approximately equal workload per CTA. Bucketing changes work organization across the GPU; XQA's established kernel still performs the attention arithmetic.</p></div>
     <div class="prose" id="decode-results"><h3>The largest gains come from mixed request lengths</h3><p>In full-model decode steps, the B9 mixed-length workload falls from <strong>20.04 ms to 14.37 ms</strong>; B32 falls from <strong>28.63 ms to 18.16 ms</strong>, reducing latency by 28.28% and 36.55%, respectively. For uniform B32, both paths take about 17.9 ms. The more skewed the workload, the more tail time global assignment can recover.<a class="ref" href="#ref-8">[8]</a></p></div>
     <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FULL-MODEL DECODE</div><h4>Spreading the long request's work</h4></div><span class="figure-tag">ms / step ↓</span></div><div id="decode-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP4 · 256 generated tokens per request · Common output window 17–240. <a href="#ref-8">Full results ↗</a></figcaption></figure>
@@ -2960,13 +2908,13 @@ for task in buckets[blockIdx.x]:
     publish_and_maybe_merge(partial)</code></pre></div>
       <p>Shared task-table addresses are fixed before CUDA Graph capture. On each forward pass, Assign updates their contents; each attention layer binds its own Q, KV, and output tensors, then executes the same work mapping. The dynamic behavior shown here lives in this small descriptor table.</p>
       <h3>One partial per task; the last finisher merges</h3><p>Each task covers one KV range. For each query head, it writes a normalized partial output <i>O<sub>i</sub></i>, a local maximum <i>m<sub>i</sub></i>, and an exponential sum <i>l<sub>i</sub></i>. Global scratch stores these values by task slot; for the current TP4 shape, the partial output's effective size is <i>6 × 256</i>.</p><p>After publishing its partial, a task updates the request's completion counter. The CTA containing that request's last-finishing task takes responsibility for reduction: it reads all partials and writes the final output directly. This merge reuses XQA's in-kernel reduction path within the same compute launch as split computation.<a class="ref" href="#ref-7">[7]</a></p></div>
-      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 07 / LAST-CTA MERGE</div><h4>The last task takes over the reduction</h4></div><span class="figure-tag">R0 · 5 tasks</span></div><div class="stepper" id="merge-steps" role="group" aria-label="Select a task completion phase"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div><figcaption>Example completion order: T2 → T0 → T4 → T3 → T1. The CTA finishing T1 last merges R0's five partials and writes the request's attention output.</figcaption></figure>
-      <div class="prose"><div class="equation"><span>m = max<sub>i</sub> m<sub>i</sub>, 　w<sub>i</sub> = l<sub>i</sub>e<sup>m<sub>i</sub>−m</sup><br>O = <span class="fraction"><span>Σ<sub>i</sub> w<sub>i</sub>O<sub>i</sub></span><span>Σ<sub>i</sub> w<sub>i</sub></span></span></span><small>Reweight each split by its softmax mass to recover the output over the full KV range.</small></div><p>If one task covers the entire request, it can write the final output directly. With multiple tasks, acquire/release atomic counting selects the last finisher after partial publication; the counter is reset when reduction completes. Split counts, scratch locations, and the reduction lifecycle are thus all tied to request identity.</p></div>
+      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 07 / LAST-CTA MERGE</div><h4>The last task takes over the reduction</h4></div><span class="figure-tag">R0 · 5 tasks</span></div><div class="stepper" id="merge-steps" role="group" aria-label="Select a task completion phase"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div><figcaption>Tasks finish in the order T2, T0, T4, T3, T1. T1 merges the five partial outputs.</figcaption></figure>
+      <div class="prose"><p>To merge the splits, take their largest softmax maximum <i>m</i>, use it to put each split’s weight on a common scale, then form the weighted average of their outputs.</p><div class="equation"><math display="block"><mi>m</mi><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>,</mo></math><math display="block"><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo><msub><mi>l</mi><mrow><mi>i</mi></mrow></msub><msup><mi>e</mi><mrow><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>−</mo><mi>m</mi></mrow></msup><mo>,</mo></math><math display="block"><mi>O</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><msub><mi>O</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub></mrow></mfrac></math></div><p>If one task covers the entire request, it can write the final output directly. With multiple tasks, acquire/release atomic counting selects the last finisher after partial publication; the counter is reset when reduction completes. Split counts, scratch locations, and the reduction lifecycle are thus all tied to request identity.</p></div>
       <details class="experiment" id="decode-experiment"><summary><span class="detail-icon">＋</span><span><strong>Experiment configuration, model results, and HTTP throughput</strong><small>Uniform / skewed workloads · Full decode steps · Serving entry point</small></span></summary><div class="experiment-body prose">
         <div class="config-grid"><div><small>Devices / parallelism</small><strong>4 × RTX 5090 · TP4</strong></div><div><small>Attention shape / rank</small><strong>Q6 / KV1 / D256 · Page32</strong></div><div><small>Model test</small><strong>256 output tokens / request</strong></div><div><small>Measurement window</small><strong>17–240 · Median of three rounds</strong></div></div>
-        <p>Model tests run four warmup banks, followed by three timed runs. Step timing includes model execution, communication, the LM head, and sampling; B9 uses a graph padded to 16 rows. Severely skewed cases retain one 130,816-token request, with 4,096 tokens in every other request.</p>
-        <div class="table-wrap"><table><thead><tr><th>Initial context</th><th>Native ms</th><th>Bucket ms</th><th>Latency reduction</th></tr></thead><tbody><tr><td>B1 · 512</td><td>10.0577</td><td>9.7397</td><td>3.16%</td></tr><tr><td>B32 · All 8,064</td><td>17.9077</td><td>17.9361</td><td>−0.16%</td></tr><tr><td>B9 · 130,816 + 8 × 4,096</td><td>20.0353</td><td>14.3697</td><td>28.28%</td></tr><tr><td>B32 · 130,816 + 31 × 4,096</td><td>28.6256</td><td>18.1637</td><td>36.55%</td></tr></tbody></table></div>
-        <h4>Serving: the same requests through a real queue</h4><p>The independent Native / Bucket HTTP comparison uses the official <code>vllm serve</code> and <code>vllm bench serve</code>, covering six request-bank types and reversing execution order in the two formal rounds. Each profile completes 540 requests. Output throughput increases by 10.41%–11.36% for mixed arrivals and 0.03%–0.07% for uniform workloads.</p><p>Serving gains also depend on the combination of queueing, prefill, and decode. The length imbalance targeted by Bucket is easiest to observe directly in model steps; continuous batching carries that benefit into actual request execution.</p>
+        <p>Model tests run four warmup runs, followed by three timed runs. Step timing includes model execution, communication, the LM head, and sampling; B9 uses a graph padded to 16 rows. Severely skewed cases retain one request of about 128K tokens and 4K tokens in each remaining request.</p>
+        <div class="table-wrap"><table><thead><tr><th>Initial context</th><th>Native ms</th><th>Bucket ms</th><th>Latency reduction</th></tr></thead><tbody><tr><td>B1 · 512</td><td>10.0577</td><td>9.7397</td><td>3.16%</td></tr><tr><td>32 × ≈8K</td><td>17.9077</td><td>17.9361</td><td>−0.16%</td></tr><tr><td>≈128K + 8 × 4K</td><td>20.0353</td><td>14.3697</td><td>28.28%</td></tr><tr><td>≈128K + 31 × 4K</td><td>28.6256</td><td>18.1637</td><td>36.55%</td></tr></tbody></table></div>
+        <h4>Serving: the same requests through a real queue</h4><p>The independent Native / Bucket HTTP comparison uses the official <code>vllm serve</code> and <code>vllm bench serve</code>, covering six request patterns and reversing execution order in the two formal rounds. Each profile completes 540 requests. Output throughput increases by 10.41%–11.36% for mixed arrivals and 0.03%–0.07% for uniform workloads.</p><p>Serving gains also depend on the combination of queueing, prefill, and decode. The length imbalance targeted by Bucket is easiest to observe directly in model steps; continuous batching carries that benefit into actual request execution.</p>
         <p class="source-line">Data: <a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/decode.csv" target="_blank" rel="noopener">decode.csv ↗</a>　Algorithm: <a href="#ref-7">XQA Bucket [7]</a>　Source: <a href="#ref-3">Tencent HPC-Ops [3]</a></p>
       </div></details>
     </div></details>
@@ -2974,18 +2922,18 @@ for task in buckets[blockIdx.x]:
 
   <section class="chapter" id="fusion">
     <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">KERNEL FUSION / PRODUCER → CONSUMER</div><h2>Let producers emit what consumers need</h2></div></div>
-    <div class="prose"><p>Scheduling keeps compute resources busy; kernel fusion shortens the path to the next operation. In low-precision inference, GEMM and attention impose specific requirements on input layouts, quantized values, and scales. Producing these formats during the upstream writeback eliminates intermediate-tensor VRAM round trips and separate processing boundaries.</p><p>Read the next three diagrams from top to bottom. Arrows show a kernel reading or writing global memory. The byte counts add the intermediate tensor’s store and reload for one token on one GPU. An L2 hit can serve a reload, so traffic measured at GDDR7 can be lower.</p></div>
+    <div class="prose"><p>Scheduling keeps compute resources busy; kernel fusion shortens the path to the next operation. In low-precision inference, GEMM and attention impose specific requirements on input layouts, quantized values, and scales. Producing these formats during the upstream writeback eliminates intermediate-tensor VRAM round trips and separate processing boundaries.</p><p>On Blackwell, four processing partitions share the SM’s L1 cache and shared-memory capacity. Each partition has its own warp scheduler, registers and execution units. A separate kernel can recover a stored value through L2. Fusing the consumer lets it use the value while it is still in registers.<a class="ref" href="#ref-16">[16]</a></p></div>
     <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> Residual + RMSNorm + NVFP4 packing</h3><p>Before the MLP, the input is added to the residual, normalized with Gemma RMSNorm, and quantized to NVFP4. The conventional path materializes a normalized BF16 tensor, which the quantization kernel reads again. The fused path performs the BF16 rounding in registers, directly emits FP4 data and native-layout scales, and still writes the updated residual in BF16.<a class="ref" href="#ref-10">[10]</a></p></div>
-    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">FIG. 08 / MLP INPUT</div><h4>Keep the residual, deliver NVFP4 directly</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a Norm fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a Norm dataflow phase"></div><div class="fusion-diagram memory-map"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>FP4 data and group scales feed native NVFP4 GEMM directly; the BF16 residual remains a separate output.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">FIG. 08 / MLP INPUT</div><h4>Keep the residual, deliver NVFP4 directly</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a Norm fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a Norm dataflow phase"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
     <div class="prose"><p>The kernel operates on one hidden-state row, combining row reduction, group quantization, and scale writes. Hidden width is 5120, with 16 elements per NVFP4 quantization group. Scales are written directly in the swizzled layout required by the downstream GEMM.</p></div>
     <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK Norm + RoPE + KV append</h3><p>The attention input boundary offers a similar opportunity. Q and K undergo normalization and rotary position encoding; V follows the quantized append path. Starting from the QKV projection output, the fused kernel directly produces BF16 Q and gate tensors, while using slot mapping to write NVFP4 K/V and their scales into the paged cache.<a class="ref" href="#ref-11">[11]</a></p></div>
-    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">FIG. 09 / ATTENTION INPUT</div><h4>Q feeds attention; K/V land directly in cache pages</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a QK fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a QK dataflow phase"></div><div class="fusion-diagram memory-map"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Q and K follow Norm → RoPE; V follows quantized append. Slot mapping determines page addresses, keeping K/V data paired with their scales.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">FIG. 09 / ATTENTION INPUT</div><h4>Q feeds attention; K/V land directly in cache pages</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a QK fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a QK dataflow phase"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
     <div class="prose"><p>The destination matters: Q feeds attention, while K/V go into already allocated cache pages. Native paging, byte strides, and quantization-scale conventions are preserved, so downstream XQA reads the same data structures.</p></div>
     <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> Attention output + gate + FP8 quantization</h3><p>The final attention result must still be multiplied by <code>sigmoid(gate)</code> and quantized to the FP8 format required by the output projection. We move this processing into the final-output epilogue: after attention normalization and split reduction, it applies the gate and packs FP8 directly.<a class="ref" href="#ref-12">[12]</a></p></div>
-    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">FIG. 10 / ATTENTION OUTPUT</div><h4>From final attention output straight to projection</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose an attention-tail path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a tail dataflow phase"></div><div class="fusion-diagram memory-map"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Partials retain the existing BF16/FP32 merge. The final writer applies the gate and static FP8 quantization, feeding the output projection directly.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">FIG. 10 / ATTENTION OUTPUT</div><h4>From final attention output straight to projection</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose an attention-tail path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a tail dataflow phase"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
     <div class="prose"><p>The single-task path runs this epilogue when writing its output directly; the multi-task path runs it in the final writer of last-CTA merge. Each request's final output is gated and quantized once, while splits retain their existing softmax merge structure.</p></div>
     <div class="prose" id="fusion-results"><h3>Operator savings inside a full decode call</h3><p>Direct operator tests reduce residual/Norm/NVFP4 latency by about <strong>33%–39%</strong> and QK/RoPE/KV-append latency by about <strong>52%–55%</strong>; the attention-tail gain in the complete XQA tail is about <strong>0.7%–1.3%</strong>. With all three fusions enabled, full GPU decode calls across B1/8/16/32 and 1K/2K contexts reduce latency over the same Bucket path by <strong>2.04%–7.18%</strong>.<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FUSION</div><h4>Four measurement scopes</h4></div><span class="figure-tag">Latency reduction</span></div><div class="fusion-result-grid"><div><small>Direct producer</small><strong>33–39<span>%</span></strong><span>Residual / RMSNorm / NVFP4</span></div><div><small>Direct producer</small><strong>52–55<span>%</span></strong><span>QK Norm / RoPE / KV Append</span></div><div><small>Complete XQA tail</small><strong>0.7–1.3<span>%</span></strong><span>Final Output / Gate / FP8</span></div><div class="result-highlight"><small>Full GPU decode · Includes LM head</small><strong>2.04–7.18<span>%</span></strong><span>Three fusions / Same Bucket path</span></div></div><figcaption>Full calls cover B1/8/16/32 × 1K/2K. Native projections, TP reductions, and the LM head retain their existing execution paths.</figcaption></figure>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FUSION</div><h4>Latency savings from producer to decode step</h4></div><span class="figure-tag">Latency reduction</span></div><div class="fusion-result-grid"><div><small>Direct producer</small><strong class="metric-range">33<span class="dash">–</span>39<span class="unit">%</span></strong><span>Residual / RMSNorm / NVFP4</span></div><div><small>Direct producer</small><strong class="metric-range">52<span class="dash">–</span>55<span class="unit">%</span></strong><span>QK Norm / RoPE / KV Append</span></div><div><small>Complete XQA tail</small><strong class="metric-range">0.7<span class="dash">–</span>1.3<span class="unit">%</span></strong><span>Final Output / Gate / FP8</span></div><div class="result-highlight"><small>Full GPU decode · Includes LM head</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>Three fusions / Same Bucket path</span></div></div></figure>
     <details class="deep-dive" id="fusion-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: numerical formats in the dataflow</strong><small>BF16 boundaries · NVFP4 group scales · Static FP8 · Full serving tests</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
       <div class="prose"><h3>The consumer's format defines the fusion interface</h3><p>All three kernels preserve their existing consumers' input contracts. NormPack emits NVFP4 data and swizzled scales; Front emits BF16 Q, BF16 gate, and paged NVFP4 K/V; Tail emits E4M3 FP8 with a static scale. Key normalization and softmax reductions use FP32, while existing BF16 rounding boundaries are preserved in registers.</p>
       <div class="code-block"><div class="code-heading">Three fusion boundaries / pseudocode</div><pre><code># ① Residual / Gemma RMSNorm / NVFP4
@@ -3007,15 +2955,15 @@ gated = bf16(fp32(o) * fp32(g))
 write_fp8_e4m3(gated / static_scale)</code></pre></div>
       <p>The fusion profile installs execution and compilation hooks during model initialization, reusing the existing Bucket graphs and native projections. Matching layouts at kernel boundaries lets the model forward pass connect these producers to the existing consumers.</p></div>
       <details class="experiment" id="fusion-experiment"><summary><span class="detail-icon">＋</span><span><strong>Three HTTP profiles and full configuration</strong><small>Native / Bucket / Bucket + Fusion · Six request workloads</small></span></summary><div class="experiment-body prose">
-        <p>Serving tests run three independent profiles with identical request banks. Each profile completes 180 priming requests and 360 formal requests. The two formal rounds reverse profile order. Output throughput is the total formal output-token count divided by total bank duration.</p>
-        <div class="config-grid"><div><small>Parallelism / KV budget</small><strong>TP4 · 8 GiB per rank</strong></div><div><small>Context / concurrency limits</small><strong>131072 · 32 requests</strong></div><div><small>Token budget</small><strong>2048 / batch</strong></div><div><small>Compile range</small><strong>[32, 2048]</strong></div></div>
-        <div class="table-wrap"><table><thead><tr><th>Workload</th><th>Native tok/s</th><th>Bucket tok/s</th><th>+ Fusion tok/s</th><th>Fusion increment</th></tr></thead><tbody><tr><td>Short C1</td><td>92.64</td><td>99.00</td><td>100.74</td><td>+1.76%</td></tr><tr><td>Uniform32</td><td>332.85</td><td>332.53</td><td>327.68</td><td>−1.46%</td></tr><tr><td>Skew16</td><td>248.03</td><td>255.70</td><td>252.99</td><td>−1.06%</td></tr><tr><td>Skew32</td><td>226.56</td><td>243.97</td><td>241.84</td><td>−0.87%</td></tr><tr><td>Mixed · 2 req/s</td><td>448.19</td><td>494.11</td><td>495.77</td><td>+0.33%</td></tr><tr><td>Mixed · 8 req/s</td><td>452.48</td><td>496.57</td><td>497.74</td><td>+0.24%</td></tr></tbody></table></div>
+        <p>Serving tests run three independent profiles with the same request sequences. Each profile completes 180 priming requests and 360 formal requests. The two formal rounds reverse profile order. Output throughput is the total formal output-token count divided by elapsed time.</p>
+        <div class="config-grid"><div><small>Parallelism / KV budget</small><strong>TP4 · 8 GiB per rank</strong></div><div><small>Context / concurrency limits</small><strong>128K · 32 requests</strong></div><div><small>Token budget</small><strong>2048 / batch</strong></div><div><small>Compile range</small><strong>[32, 2048]</strong></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Workload</th><th>Native tok/s</th><th>Bucket tok/s</th><th>+ Fusion tok/s</th><th>Fusion increment</th></tr></thead><tbody><tr><td>Single short request</td><td>92.64</td><td>99.00</td><td>100.74</td><td>+1.76%</td></tr><tr><td>32 uniform requests</td><td>332.85</td><td>332.53</td><td>327.68</td><td>−1.46%</td></tr><tr><td>16 mixed lengths</td><td>248.03</td><td>255.70</td><td>252.99</td><td>−1.06%</td></tr><tr><td>32 mixed lengths</td><td>226.56</td><td>243.97</td><td>241.84</td><td>−0.87%</td></tr><tr><td>Mixed · 2 req/s</td><td>448.19</td><td>494.11</td><td>495.77</td><td>+0.33%</td></tr><tr><td>Mixed · 8 req/s</td><td>452.48</td><td>496.57</td><td>497.74</td><td>+0.24%</td></tr></tbody></table></div>
         <p>The serving-level fusion increment ranges from −1.46% to +1.76%; mixed arrivals retain most of Bucket's throughput benefit. These measurements include native prefill, queue scheduling, and the full request lifecycle. Fusion shortens local data paths within forward execution, while HTTP throughput depends on the whole serving chain. Comparing both scopes shows where the optimization takes effect.</p>
         <p class="source-line">Data: <a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/http_fusion.csv" target="_blank" rel="noopener">http_fusion.csv ↗</a>　Implementation: <a href="#ref-10">NormPack [10]</a> · <a href="#ref-11">Front [11]</a> · <a href="#ref-12">Tail [12]</a></p>
       </div></details>
     </div></details>
   </section>
-  <section class="closing prose" id="closing"><div class="eyebrow">PUTTING IT TOGETHER</div><h2>From fast computation to well-connected execution</h2><p>These optimizations operate at different scales but share one objective. VPP makes downstream work ready earlier across GPUs. KV Bucket distributes one attention call's work more evenly across CTAs. Fusion makes producer outputs arrive in the layout and precision their consumers require.</p><p>In this project, vLLM supplies the model-execution and serving framework; VPP and HPC-Ops supply scheduling ideas worth adapting; and FlashInfer XQA supplies the low-precision attention compute foundation. The engineering work connects these pieces to SM120 hardware and the actual NVFP4 data path, then examines their effects through timelines, task tables, and VRAM reads and writes.</p><p class="closing-line">Order work across GPUs, distribute it across SMs, and deliver data between kernels. Inference performance accumulates at these boundaries.</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">Explore source, configurations, and full benchmarks <span aria-hidden="true">↗</span></a></section>
+  <section class="closing prose" id="closing"><h2>Where the gains show up</h2><p>With four 32K prompts, folding the pipeline brought prefill time from 4.30 to 3.94 seconds. During decode, one long request among 31 short ones left most attention CTAs idle while a few finished the long request. Redistributing its KV tiles cut the step from 28.63 to 18.16 ms. On that same bucketed path, fusion saves a write and a read whenever a kernel can produce the next operator’s input directly. Across the tested decode shapes, the three fusions cut GPU step latency by a further 2.04% to 7.18%.</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">Explore source, configurations, and full benchmarks <span aria-hidden="true">↗</span></a></section>
   <section class="references" id="references"><div class="eyebrow">SOURCES & IMPLEMENTATION</div><h2>Sources and implementation</h2><p>The figures' cost models, task partitions, and data paths correspond to the equations above and the sources below.</p>
     <ol class="reference-list">
       <li id="ref-1"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener">Qwen3.8 SM120: VPP & Bucket Attention <span>↗</span></a><small>Project overview, installation, and overall architecture.</small></li>
@@ -3033,6 +2981,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       <li id="ref-13"><a href="https://arxiv.org/abs/2608.26523" target="_blank" rel="noopener">VPP · arXiv:2608.26523 <span>↗</span></a><small>The folded virtual pipeline parallelism paper cited by the project.</small></li>
       <li id="ref-14"><a href="https://arxiv.org/abs/2603.05451" target="_blank" rel="noopener">FlashAttention-4: Algorithm and Kernel Pipelining Co-Design <span>↗</span></a><small>Hardware-aware attention design, task scheduling, and kernel pipelining.</small></li>
       <li id="ref-15"><a href="https://github.com/Tencent/hpc-ops/blob/2a2e26562433a8ba4b504858f1c938eb7612c901/src/attention/decode/sm90/assign_task.cu" target="_blank" rel="noopener">Tencent HPC-Ops · Assign Task <span>↗</span></a><small>Upstream source for global KV partitioning and CTA task assignment.</small></li>
+      <li id="ref-16"><a href="https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf" target="_blank" rel="noopener">NVIDIA RTX Blackwell GPU Architecture ↗</a><small>Figure 5 shows the four SM partitions and their shared on-chip memory.</small></li>
     </ol>
   </section>
   <footer class="site-footer"><div><strong>NICKO / SYSTEMS</strong><span>Qwen3.8 27B · SM120 · 2026</span></div><a href="#top">Back to top ↑</a></footer>
@@ -3058,7 +3007,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     <a href="#fusion-front" class="toc-sub">QK / RoPE / KV append</a>
     <a href="#fusion-tail" class="toc-sub">Attention / Gate / FP8</a>
     <a href="#fusion-results" class="toc-sub">From operators to full calls</a>
-    <a href="#closing" class="toc-main">Connecting the three scales</a>
+    <a href="#closing" class="toc-main">Where the gains show up</a>
     <a href="#references" class="toc-main">Sources and implementation</a>
   </nav>
   <div class="toc-bottom"><span class="dot"></span> SM120 · RTX 5090<br><span class="muted">Qwen3.8 · NVFP4 · vLLM</span></div>
@@ -3066,8 +3015,236 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 </div>
 <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 <noscript><div class="noscript">Enable JavaScript for the step-by-step diagrams. The article, experimental results, and references remain readable without it.</div></noscript>
-<script id="benchmark-data" type="application/json">{"prefill":[{"input_tokens":"8192","requests":"4","cpp_ms":"832.413","vpp_ms":"795.197","vpp_chunk_tokens":"2048","vpp_graph":"piecewise"},{"input_tokens":"32768","requests":"4","cpp_ms":"4304.359","vpp_ms":"3936.227","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"65536","requests":"4","cpp_ms":"11647.508","vpp_ms":"10834.357","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"131071","requests":"4","cpp_ms":"35241.058","vpp_ms":"33410.873","vpp_chunk_tokens":"8192","vpp_graph":"none"}],"decode":[{"batch":"1","context_pattern":"512","native_ms":"10.0577","bucket_ms":"9.7397"},{"batch":"32","context_pattern":"32x8064","native_ms":"17.9077","bucket_ms":"17.9361"},{"batch":"9","context_pattern":"130816+8x4096","native_ms":"20.0353","bucket_ms":"14.3697"},{"batch":"32","context_pattern":"130816+31x4096","native_ms":"28.6256","bucket_ms":"18.1637"}],"http_fusion":[{"bank":"short_c1","native_tokens_per_second":"92.64","bucket_tokens_per_second":"99.00","fused_tokens_per_second":"100.74"},{"bank":"uniform32","native_tokens_per_second":"332.85","bucket_tokens_per_second":"332.53","fused_tokens_per_second":"327.68"},{"bank":"skew16","native_tokens_per_second":"248.03","bucket_tokens_per_second":"255.70","fused_tokens_per_second":"252.99"},{"bank":"skew32","native_tokens_per_second":"226.56","bucket_tokens_per_second":"243.97","fused_tokens_per_second":"241.84"},{"bank":"mixed_2rps","native_tokens_per_second":"448.19","bucket_tokens_per_second":"494.11","fused_tokens_per_second":"495.77"},{"bank":"mixed_8rps","native_tokens_per_second":"452.48","bucket_tokens_per_second":"496.57","fused_tokens_per_second":"497.74"}]}</script><script id="diagram-messages" type="application/json">{"memory.sm":"On the SM","memory.global":"Global memory","memory.load":"Read","memory.store":"Write","memory.norm":{"load":[["Add + RMSNorm","Read one hidden row"],["BF16 input","x, residual and gain"]],"store":[["Norm kernel","Write normalized y"],["BF16 y","5,120 elements"]],"reload":[["Pack kernel","Read y in groups of 16"],["BF16 y","The same row"]],"local":[["Reduce and pack","10 warps share row sums. Each thread packs 16 rounded values."],"Keeping y on chip saves 20 KiB per token: 10 KiB written and 10 KiB read."],"output":[["Emit NVFP4","Pack values and swizzle scales"],["FP4 values + scales","The MLP reads this input. The residual has its own BF16 write."]]},"memory.front":{"load":[["Per-head transform","Normalize and rotate Q and K"],["Projection output","Q, gate, K and V"]],"store":[["QK kernel","Write rotated K"],["BF16 K","256 values per KV head"]],"reload":[["Append kernel","Read K, then pack K and V"],["BF16 K","Rotated key"]],"local":[["Rotate, then pack K","Four warps reduce one head. The key CTA packs K and V for the cache."],"Keeping rotated K on chip saves 1 KiB per token per KV head: 512 B each way."],"output":[["Append by slot","Use the page and offset"],["Paged K/V and scales","Q goes to attention. Gate is saved for the epilogue."]]},"memory.tail":{"load":[["Compute final O","Single task or last-CTA merge"],["XQA inputs","Paged KV for attention, split scratch for merge"]],"store":[["Final XQA writer","Write the completed output"],["BF16 O","6 heads × 256 values"]],"reload":[["Gate + quantize","Read O and apply the gate"],["BF16 O","Completed head outputs"]],"local":[["Gate in the final writer","Read gate and scale, then pack eight E4M3 values into one 8-byte store."],"Keeping final O on chip saves 6 KiB per token on this rank: 3 KiB each way."],"output":[["Write FP8","Pack the projection input"],["Output projection input","E4M3 activation"]]},"theme.light":"Switch to light mode","theme.dark":"Switch to dark mode","toc.close":"Close contents","toc.open":"Open contents","pipe.start":"Start","pipe.fill":"Fill","pipe.turn":"Turn","pipe.steady":"Interleave","pipe.drain":"Drain","overview":"Overview","pipe.all":"\u003coption value=\"-1\">All\u003c/option>","pipe.finish":"Finish {0} u","pipe.tip":"\u003cstrong>{0} · GPU{1} · C{2}\u003c/strong>Stage {3} · {4}\u003cbr>Prior context: {5}C\u003cbr>Start: {6} u\u003cbr>End: {7} u\u003cbr>Duration: {8} u","pipe.timeline":"{0} compute timeline across four GPUs","pipe.startNote":"C0 starts on GPU0. CPP runs 16 layers per stage and VPP runs eight. Both paths process all 64 layers.","pipe.fillNote":"Each GPU starts as soon as its input arrives. GPU0 keeps admitting chunks. The VPP warmup counts are \u003cstrong>7 / 5 / 3 / 1\u003c/strong>, so inner ranks begin the return leg first.","pipe.turnNote":"C0 reaches GPU3 and moves locally from S3 to S4. Older chunks start the return leg while newer ones move forward. Both legs share the compute stream on each rank.","pipe.steadyNote":"Each GPU alternates between an older chunk on the return leg and a newer chunk on the forward leg. Eight-layer stages let work on the second half of the network start earlier.","pipe.drainNote":"All chunks have entered the pipeline. VPP finishes the remaining return stages. CPP still has to move the last, most expensive chunks through its physical stages.","pipe.uniformNote":"With equal chunk costs, both schedules finish together. Select increasing costs to see how a growing KV history changes pipeline fill and drain.","pipe.growthNote":"In this model CPP finishes at \u003cstrong>{0} u\u003c/strong> and VPP at \u003cstrong>{1} u\u003c/strong>. The amount of compute is the same. Stage size and local execution order determine the difference.","pipe.phase":"Stage {0} / 6","pipe.cppIdle":"CPP idle per GPU","pipe.elapsed":"Average over the full schedule","pipe.vppIdle":"VPP idle per GPU","pipe.equalWork":"Same total compute","pipe.delta":"Modeled time saved","rank.receive":"Receive input","rank.compute":"Run stage","rank.send":"Send output","rank.reuse":"Reuse slots","rank.from0":"From GPU0","rank.from2":"From GPU2","rank.edgeRings":"Per-edge host rings","rank.shared":"Both directions","rank.current":"Slot 0 · current","rank.ahead1":"Slot 1 · prefetch","rank.ahead2":"Slot 2 · prefetch","rank.interleave":"Interleave S1 / S6","rank.sendPrev":"Send prior","rank.writeNext":"Write next","rank.to2":"To GPU2","rank.to0":"To GPU0","rank.progress":"Advance DMA and exchange READY / ACK","rank.capacity":"Fixed buffers at C8192: 2 source + 3 receive slots = 800 MiB","rank.diagram":"GPU1 shared buffers and three CUDA streams","rank.overviewNote":"One compute stream runs both legs on each rank. The legs share two physical source slots and three receive slots. Each edge tracks its own sequence numbers and events.","rank.receiveNote":"The shared H2D stream writes incoming data from both legs to the receive arena. One slot supplies the running stage. The others prefetch admitted forward or return inputs in FIFO order.","rank.computeNote":"The compute stream waits for the matching receive event, runs S1 or S6, and records a consumer event after the stage has finished reading its input.","rank.sendNote":"A stage publishes its output in a source slot. When a captured stage returns separate storage, its output is copied into that slot. D2H can send the prior output while compute uses the other slot. Hidden and residual each have a ready event.","rank.reuseNote":"D2H completion releases the source slot. The consumer event releases the receive slot. The host progress thread advances DMA and reuses each host segment after H2D completes.","dma.ready":"Output ready","dma.d2h":"Queue D2H","dma.h2d":"Queue H2D","dma.pipeline":"Overlap segments","dma.received":"Input ready","dma.release":"Consume and release","dma.outputEvent":"Output event","dma.wait":"Wait → H2D → ACK","dma.diagram":"Segmented DMA events between GPU0 and GPU1","dma.free":"Reusable","dma.held":"Holds C0 output","dma.read":"Chunk read","dma.cycle":"Reuse after H2D","dma.consuming":"Stage reading","dma.writing":"H2D in progress","dma.waiting":"Ready to receive","dma.readyNote":"GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the progress thread can prepare its segments.","dma.d2hNote":"The host queues one segment's D2H copy and its completion event on the send stream, then publishes READY with the event generation the receiver should wait for.","dma.h2dNote":"GPU1 queues \u003cstrong>Wait(D2H event) → H2D → H2D event\u003c/strong>, then publishes ACK. The copy engine starts H2D as soon as the D2H dependency is satisfied.","dma.pipelineNote":"D2H for one segment overlaps H2D for the previous segment. Eight host segments carry the full 160 MiB boundary in turns. Reusing a ring position requires its ACK and H2D completion.","dma.receivedNote":"GPU1 has the full input. Its compute stream passes the receive event and starts S1(C0). GPU0 has released its source slot after D2H, and this chunk has passed through the host ring.","dma.releaseNote":"When S1(C0) finishes reading the input, its consumer event releases the receive slot. Source slots, host segments and receive slots become reusable at different points, each after its last reader finishes.","load.native":"Native uniform split","load.active":"Active CTAs: {0} / 170","load.tasks":"\u003cbr>Tasks: {0}","load.diagram":"KV work across 170 CTAs under native splitting and global bucketing","load.nativeMax":"Heaviest native CTA","load.bucketMax":"Heaviest bucket CTA","load.batch":"Whole batch","load.counts":"{0} tasks · {1} active buckets","load.uniformStart":"With uniform context lengths the native split already balances work. The heaviest CTA in either schedule handles \u003cstrong>","load.uniformEnd":" tiles\u003c/strong>.","load.skewNote":"Native splitting concentrates the long request on a few CTAs. The busiest handles \u003cstrong>{0} tiles\u003c/strong>. Global buckets assign about \u003cstrong>{1} tiles\u003c/strong> each and start a new task wherever a bucket crosses a request boundary.","bucket.requests":"Requests","bucket.pack":"Build buckets","bucket.run":"Execute","bucket.partials":"Write partials","bucket.cost":"KV length sets the workload","bucket.tileSize":"Each tile covers 256 KV tokens","bucket.summary":"{0} tiles total · {1} CTAs available · {2} tiles per bucket","bucket.skew":"B32: one long request and 31 short ones","bucket.tileAxis":"Lay out the KV tiles along one global axis","bucket.budgetTitle":"Common work budget","bucket.budgetCalc":"{0} / 170 → {1} tiles per bucket","bucket.identity":"Keep request identity","bucket.boundary":"Start a new task at each request boundary","bucket.example":"8 buckets, 9 tasks","bucket.select":"170 buckets · Select a CTA to inspect its tasks","bucket.empty":"Empty bucket","bucket.ctaPath":"Each CTA executes its tasks in order within one launch","bucket.order":"Execution order for CTA {0}","bucket.inside":"Inside each task","bucket.readQ":"Load Q for this request","bucket.readTiles":"Traverse its KV tile range","bucket.softmax":"Update the online softmax","bucket.write":"Store the task's partial result","bucket.max":"170 CTAs · at most 6 tiles per CTA","bucket.sequence":"CTA {0} executes in order","bucket.mergeTitle":"Write one partial per task and merge by request","bucket.taskCount":"Tasks: {0}","bucket.byRequest":"Merge per request","bucket.other":"Other requests follow the same partial-to-merge path to their own outputs.","bucket.diagram":"Step through KV tiles, tasks and buckets","bucket.total":"Total KV work","bucket.reqCount":"Requests: {0}","bucket.budget":"Bucket budget","bucket.active":"Active CTAs: {0}","bucket.slots":"Task / partial slots","bucket.count":"Buckets: {0}","bucket.requestsNote":"Read the KV lengths for this batch. Each request keeps its own Q, KV page table and output position.","bucket.tilesNote":"Count tiles in units of 256 tokens, then compute their global prefix offsets. Each tile retains its request ID. KV data stays in the paged cache.","bucket.packNote":"Each bucket has a budget of \u003cstrong>{0} tiles\u003c/strong>. CTA {1} has \u003cstrong>{2} task(s)\u003c/strong>{3}","bucket.cross":" because its range crosses a request boundary.","bucket.same":" within a single request.","bucket.runNote":"A CTA walks its bucket in task order. All tiles in a task share an online softmax accumulator. Finishing the task publishes one partial result.","bucket.mergeNote":"A counter collects partials for each request. The CTA that finishes the last task reads all its partials and writes the final O. A single-task request writes O directly.","bucket.table":"\u003ctable>\u003cthead>\u003ctr>\u003cth>Task\u003c/th>\u003cth>Request\u003c/th>\u003cth>KV tile range\u003c/th>\u003cth>Count\u003c/th>\u003cth>Bucket / CTA\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>","merge.start":"Start","merge.t2":"T2 done","merge.t0":"T0 done","merge.t4":"T4 done","merge.t3":"T3 done","merge.tasks":"Compute tasks","merge.done":"Done","merge.running":"Running","merge.wait":"Await partial","merge.counter":"Completions","merge.winner":"Performs merge","merge.output":"6 × 256 / final","merge.pending":"Await merge","merge.reweight":"Read 5 partials → reweight by softmax mass","merge.order":"Finish order: T2 → T0 → T4 → T3 → T1","merge.reset":"Write output and reset counter","merge.publish":"Each finisher publishes its own partial","merge.diagram":"Five tasks publish partials in completion order and the last CTA merges them","merge.startNote":"R0 has five tasks on different CTAs. Each has its own scratch slot.","merge.t2Note":"T2 finishes first, stores O₂, m₂ and l₂, then increments the completion count for R0.","merge.t0Note":"T0 finishes. Two partials are ready in scratch while the other tasks keep running.","merge.t4Note":"T4 has finished. T3 and T1 are still running. Completion order determines which CTA will merge the results.","merge.t3Note":"Four partials are ready. The CTA running T1 is finishing the last task.","merge.t1Note":"T1 increments the counter and sees the previous value 4. As the last finisher it reads all five partials, reweights them by softmax mass and writes O_R0.","fusion.readInput":"Read input","fusion.normQuant":"Normalize and pack","fusion.gemm":"Feed GEMM","fusion.readProj":"Read projection","fusion.qkv":"Process Q, K and V","fusion.store":"Write outputs","fusion.final":"Finish attention","fusion.gateQuant":"Gate and quantize","fusion.project":"Feed projection","fusion.fused":"fused","fusion.native":"native","norm.inputNote":"Read x, the residual and the norm weights. One CTA adds the residual and reduces the sum of squares across a row of 5,120 elements.","norm.fusedNote":"Each warp reduces its sum of squares by shuffle. Ten FP32 partials meet in shared memory; warp 0 computes the inverse RMS. Each thread rounds 16 normalized values to BF16 and packs them with one E4M3 scale.","norm.nativeNote":"Add and RMSNorm produce BF16 y. A separate quantizer reads that tensor and packs it into NVFP4.","norm.outNote":"The kernel writes the \u003cstrong>BF16 residual, packed FP4 values and native-layout scales\u003c/strong>. The MLP GEMM reads the packed input directly.","norm.unfusedOut":"The BF16 residual is retained. A separate quantization stage supplies packed FP4 and scales to the MLP GEMM.","front.inputNote":"Read the QKV projection outputs, positions, slot mapping and quantization scales. The Q side also supplies the gate used after attention.","front.fusedNote":"One 128-thread CTA handles a token and a Q or K head. Four warps combine their sums through shared memory. On the K path, rotated values feed the FP4 packer directly. V is read from the projection and packed for the same cache slot.","front.nativeNote":"Q and K first undergo their per-head transforms. A subsequent quantize-and-append stage reads K and V and writes their pages.","front.outNote":"Attention receives \u003cstrong>BF16 Q and the gate\u003c/strong>, plus \u003cstrong>NVFP4 K/V and scales\u003c/strong> in the paged cache. It reads the existing page table and native data layout.","tail.inputNote":"A single task produces O directly. With multiple tasks the last CTA merges their partials. At this point the softmax reduction covers the request's full KV range.","tail.fusedNote":"The final writer applies BF16 sigmoid(gate), a BF16 multiply and static FP8 quantization in sequence to produce the projection input.","tail.nativeNote":"Attention stores BF16 O. The native compiled epilogue reads it, applies the gate and quantizes to FP8.","tail.outNote":"The final store writes \u003cstrong>E4M3 FP8\u003c/strong> directly for the output projection. Partial computation and merging keep their existing formats.","tail.unfusedOut":"The epilogue writes the FP8 tensor consumed by the output projection.","chart.prefillRow":"\u003cdiv class=\"bench-row\">\u003cdiv class=\"bench-row-title\">\u003cspan>{0} input tokens / request\u003c/span>\u003cspan class=\"bench-gain\">−{1}%\u003c/span>\u003c/div>{2}{3}\u003c/div>","chart.uniform":"B32 · uniform 8K"}</script>
-<script>/* Qwen SM120 interactive article. All diagrams are deterministic, local and manually stepped. */
+<script id="benchmark-data" type="application/json">{"prefill":[{"input_tokens":"8192","requests":"4","cpp_ms":"832.413","vpp_ms":"795.197","vpp_chunk_tokens":"2048","vpp_graph":"piecewise"},{"input_tokens":"32768","requests":"4","cpp_ms":"4304.359","vpp_ms":"3936.227","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"65536","requests":"4","cpp_ms":"11647.508","vpp_ms":"10834.357","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"131071","requests":"4","cpp_ms":"35241.058","vpp_ms":"33410.873","vpp_chunk_tokens":"8192","vpp_graph":"none"}],"decode":[{"batch":"1","context_pattern":"512","native_ms":"10.0577","bucket_ms":"9.7397"},{"batch":"32","context_pattern":"32x8064","native_ms":"17.9077","bucket_ms":"17.9361"},{"batch":"9","context_pattern":"130816+8x4096","native_ms":"20.0353","bucket_ms":"14.3697"},{"batch":"32","context_pattern":"130816+31x4096","native_ms":"28.6256","bucket_ms":"18.1637"}],"http_fusion":[{"bank":"short_c1","native_tokens_per_second":"92.64","bucket_tokens_per_second":"99.00","fused_tokens_per_second":"100.74"},{"bank":"uniform32","native_tokens_per_second":"332.85","bucket_tokens_per_second":"332.53","fused_tokens_per_second":"327.68"},{"bank":"skew16","native_tokens_per_second":"248.03","bucket_tokens_per_second":"255.70","fused_tokens_per_second":"252.99"},{"bank":"skew32","native_tokens_per_second":"226.56","bucket_tokens_per_second":"243.97","fused_tokens_per_second":"241.84"},{"bank":"mixed_2rps","native_tokens_per_second":"448.19","bucket_tokens_per_second":"494.11","fused_tokens_per_second":"495.77"},{"bank":"mixed_8rps","native_tokens_per_second":"452.48","bucket_tokens_per_second":"496.57","fused_tokens_per_second":"497.74"}]}</script><script id="diagram-messages" type="application/json">{"theme.light":"Switch to light mode","theme.dark":"Switch to dark mode","toc.close":"Close contents","toc.open":"Open contents","pipe.start":"Start","pipe.fill":"Fill","pipe.turn":"Turn","pipe.steady":"Interleave","pipe.drain":"Drain","overview":"Overview","pipe.all":"\u003coption value=\"-1\">All\u003c/option>","pipe.finish":"Finish {0} u","pipe.tip":"\u003cstrong>{0} · GPU{1} · C{2}\u003c/strong>Stage {3} · {4}\u003cbr>Prior context: {5}C\u003cbr>Start: {6} u\u003cbr>End: {7} u\u003cbr>Duration: {8} u","pipe.timeline":"{0} compute timeline across four GPUs","pipe.startNote":"C0 starts on GPU0. CPP runs 16 layers per stage and VPP runs eight. Both paths process all 64 layers.","pipe.fillNote":"Each GPU starts as soon as its input arrives. GPU0 keeps admitting chunks. The VPP warmup counts are \u003cstrong>7 / 5 / 3 / 1\u003c/strong>, so inner ranks begin the return leg first.","pipe.turnNote":"C0 reaches GPU3 and moves locally from S3 to S4. Older chunks start the return leg while newer ones move forward. Both legs share the compute stream on each rank.","pipe.steadyNote":"Each GPU alternates between an older chunk on the return leg and a newer chunk on the forward leg. Eight-layer stages let work on the second half of the network start earlier.","pipe.drainNote":"All chunks have entered the pipeline. VPP finishes the remaining return stages. CPP still has to move the last, most expensive chunks through its physical stages.","pipe.uniformNote":"With equal chunk costs, both schedules finish together. Select increasing costs to see how a growing KV history changes pipeline fill and drain.","pipe.growthNote":"In this model CPP finishes at \u003cstrong>{0} u\u003c/strong> and VPP at \u003cstrong>{1} u\u003c/strong>. The amount of compute is the same. Stage size and local execution order determine the difference.","pipe.phase":"Stage {0} / 6","pipe.cppIdle":"CPP idle per GPU","pipe.elapsed":"Average over the full schedule","pipe.vppIdle":"VPP idle per GPU","pipe.equalWork":"Same total compute","pipe.delta":"Modeled time saved","rank.receive":"Receive input","rank.compute":"Run stage","rank.send":"Send output","rank.reuse":"Reuse slots","rank.from0":"From GPU0","rank.from2":"From GPU2","rank.edgeRings":"Per-edge host rings","rank.shared":"Both directions","rank.current":"Slot 0 · current","rank.ahead1":"Slot 1 · prefetch","rank.ahead2":"Slot 2 · prefetch","rank.interleave":"Interleave S1 / S6","rank.sendPrev":"Send prior","rank.writeNext":"Write next","rank.to2":"To GPU2","rank.to0":"To GPU0","rank.progress":"Advance DMA and exchange READY / ACK","rank.capacity":"Fixed buffers with 8K chunks: 2 source + 3 receive slots = 800 MiB","rank.diagram":"GPU1 shared buffers and three CUDA streams","rank.overviewNote":"One compute stream runs both legs on each rank. The legs share two physical source slots and three receive slots. Each edge tracks its own sequence numbers and events.","rank.receiveNote":"The shared H2D stream writes incoming data from both legs to the receive arena. One slot supplies the running stage. The others prefetch admitted forward or return inputs in FIFO order.","rank.computeNote":"The compute stream waits for the matching receive event, runs S1 or S6, and records a consumer event after the stage has finished reading its input.","rank.sendNote":"A stage publishes its output in a source slot. When a captured stage returns separate storage, its output is copied into that slot. D2H can send the prior output while compute uses the other slot. Hidden and residual each have a ready event.","rank.reuseNote":"D2H completion releases the source slot. The consumer event releases the receive slot. The host progress thread advances DMA and reuses each host segment after H2D completes.","dma.ready":"Output ready","dma.d2h":"Queue D2H","dma.h2d":"Queue H2D","dma.pipeline":"Overlap segments","dma.received":"Input ready","dma.release":"Consume and release","dma.outputEvent":"Output event","dma.wait":"Wait → H2D → ACK","dma.diagram":"Segmented DMA events between GPU0 and GPU1","dma.free":"Reusable","dma.held":"Holds C0 output","dma.read":"Chunk read","dma.cycle":"Reuse after H2D","dma.consuming":"Stage reading","dma.writing":"H2D in progress","dma.waiting":"Ready to receive","dma.readyNote":"GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the progress thread can prepare its segments.","dma.d2hNote":"The host queues one segment's D2H copy and its completion event on the send stream, then publishes READY with the event generation the receiver should wait for.","dma.h2dNote":"GPU1 queues \u003cstrong>Wait(D2H event) → H2D → H2D event\u003c/strong>, then publishes ACK. The copy engine starts H2D as soon as the D2H dependency is satisfied.","dma.pipelineNote":"D2H for one segment overlaps H2D for the previous segment. Eight host segments carry the full 160 MiB boundary in turns. Reusing a ring position requires its ACK and H2D completion.","dma.receivedNote":"GPU1 has the full input. Its compute stream passes the receive event and starts S1(C0). GPU0 has released its source slot after D2H, and this chunk has passed through the host ring.","dma.releaseNote":"When S1(C0) finishes reading the input, its consumer event releases the receive slot. Source slots, host segments and receive slots become reusable at different points, each after its last reader finishes.","load.native":"Native uniform split","load.active":"Active CTAs: {0} / 170","load.tasks":"\u003cbr>Tasks: {0}","load.diagram":"KV work across 170 CTAs under native splitting and global bucketing","load.nativeMax":"Heaviest native CTA","load.bucketMax":"Heaviest bucket CTA","load.batch":"Whole batch","load.counts":"{0} tasks · {1} active buckets","load.uniformStart":"With uniform context lengths the native split already balances work. The heaviest CTA in either schedule handles \u003cstrong>","load.uniformEnd":" tiles\u003c/strong>.","load.skewNote":"Native splitting concentrates the long request on a few CTAs. The busiest handles \u003cstrong>{0} tiles\u003c/strong>. Global buckets assign about \u003cstrong>{1} tiles\u003c/strong> each and start a new task wherever a bucket crosses a request boundary.","bucket.requests":"Requests","bucket.pack":"Build buckets","bucket.run":"Execute","bucket.partials":"Write partials","bucket.cost":"KV length sets the workload","bucket.tileSize":"Each tile covers 256 KV tokens","bucket.summary":"{0} tiles total · {1} CTAs available · {2} tiles per bucket","bucket.skew":"B32: one long request and 31 short ones","bucket.tileAxis":"Lay out the KV tiles along one global axis","bucket.budgetTitle":"Common work budget","bucket.budgetCalc":"{0} / 170 → {1} tiles per bucket","bucket.identity":"Keep request identity","bucket.boundary":"Start a new task at each request boundary","bucket.example":"8 buckets, 9 tasks","bucket.select":"170 buckets · Select a CTA to inspect its tasks","bucket.empty":"Empty bucket","bucket.ctaPath":"Each CTA executes its tasks in order within one launch","bucket.order":"Execution order for CTA {0}","bucket.inside":"Inside each task","bucket.readQ":"Load Q for this request","bucket.readTiles":"Traverse its KV tile range","bucket.softmax":"Update the online softmax","bucket.write":"Store the task's partial result","bucket.max":"170 CTAs · at most 6 tiles per CTA","bucket.sequence":"CTA {0} executes in order","bucket.mergeTitle":"Write one partial per task and merge by request","bucket.taskCount":"Tasks: {0}","bucket.byRequest":"Merge per request","bucket.other":"Other requests follow the same partial-to-merge path to their own outputs.","bucket.diagram":"Step through KV tiles, tasks and buckets","bucket.total":"Total KV work","bucket.reqCount":"Requests: {0}","bucket.budget":"Bucket budget","bucket.active":"Active CTAs: {0}","bucket.slots":"Task / partial slots","bucket.count":"Buckets: {0}","bucket.requestsNote":"Read the KV lengths for this batch. Each request keeps its own Q, KV page table and output position.","bucket.tilesNote":"Count tiles in units of 256 tokens, then compute their global prefix offsets. Each tile retains its request ID. KV data stays in the paged cache.","bucket.packNote":"Each bucket has a budget of \u003cstrong>{0} tiles\u003c/strong>. CTA {1} has \u003cstrong>{2} task(s)\u003c/strong>{3}","bucket.cross":" because its range crosses a request boundary.","bucket.same":" within a single request.","bucket.runNote":"A CTA walks its bucket in task order. All tiles in a task share an online softmax accumulator. Finishing the task publishes one partial result.","bucket.mergeNote":"A counter collects partials for each request. The CTA that finishes the last task reads all its partials and writes the final O. A single-task request writes O directly.","bucket.table":"\u003ctable>\u003cthead>\u003ctr>\u003cth>Task\u003c/th>\u003cth>Request\u003c/th>\u003cth>KV tile range\u003c/th>\u003cth>Count\u003c/th>\u003cth>Bucket / CTA\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>","merge.start":"Start","merge.t2":"T2 done","merge.t0":"T0 done","merge.t4":"T4 done","merge.t3":"T3 done","merge.tasks":"Compute tasks","merge.done":"Done","merge.running":"Running","merge.wait":"Await partial","merge.counter":"Completions","merge.winner":"Performs merge","merge.output":"6 × 256 / final","merge.pending":"Await merge","merge.reweight":"Read 5 partials → reweight by softmax mass","merge.order":"Finish order: T2 → T0 → T4 → T3 → T1","merge.reset":"Write output and reset counter","merge.publish":"Each finisher publishes its own partial","merge.diagram":"Five tasks publish partials in completion order and the last CTA merges them","merge.startNote":"R0 has five tasks on different CTAs. Each has its own scratch slot.","merge.t2Note":"T2 finishes first, stores O₂, m₂ and l₂, then increments the completion count for R0.","merge.t0Note":"T0 finishes. Two partials are ready in scratch while the other tasks keep running.","merge.t4Note":"T4 has finished. T3 and T1 are still running. Completion order determines which CTA will merge the results.","merge.t3Note":"Four partials are ready. The CTA running T1 is finishing the last task.","merge.t1Note":"T1 increments the counter and sees the previous value 4. As the last finisher it reads all five partials, reweights them by softmax mass and writes O_R0.","fusion.readInput":"Read input","fusion.normQuant":"Normalize and pack","fusion.gemm":"Feed GEMM","fusion.readProj":"Read projection","fusion.qkv":"Process Q, K and V","fusion.store":"Write outputs","fusion.final":"Finish attention","fusion.gateQuant":"Gate and quantize","fusion.project":"Feed projection","fusion.fused":"fused","fusion.native":"native","norm.inputNote":"Read x, the residual and the norm weights. One CTA adds the residual and reduces the sum of squares across a row of 5,120 elements.","norm.fusedNote":"Each warp reduces its sum of squares by shuffle. Ten FP32 partials meet in shared memory; warp 0 computes the inverse RMS. Each thread rounds 16 normalized values to BF16 and packs them with one E4M3 scale.","norm.nativeNote":"Add and RMSNorm produce BF16 y. A separate quantizer reads that tensor and packs it into NVFP4.","norm.outNote":"The kernel writes the \u003cstrong>BF16 residual, packed FP4 values and native-layout scales\u003c/strong>. The MLP GEMM reads the packed input directly.","norm.unfusedOut":"The BF16 residual is retained. A separate quantization stage supplies packed FP4 and scales to the MLP GEMM.","front.inputNote":"Read the QKV projection outputs, positions, slot mapping and quantization scales. The Q side also supplies the gate used after attention.","front.fusedNote":"One 128-thread CTA handles a token and a Q or K head. Four warps combine their sums through shared memory. On the K path, rotated values feed the FP4 packer directly. V is read from the projection and packed for the same cache slot.","front.nativeNote":"Q and K first undergo their per-head transforms. A subsequent quantize-and-append stage reads K and V and writes their pages.","front.outNote":"Attention receives \u003cstrong>BF16 Q and the gate\u003c/strong>, plus \u003cstrong>NVFP4 K/V and scales\u003c/strong> in the paged cache. It reads the existing page table and native data layout.","tail.inputNote":"A single task produces O directly. With multiple tasks the last CTA merges their partials. At this point the softmax reduction covers the request's full KV range.","tail.fusedNote":"The final writer applies BF16 sigmoid(gate), a BF16 multiply and static FP8 quantization in sequence to produce the projection input.","tail.nativeNote":"Attention stores BF16 O. The native compiled epilogue reads it, applies the gate and quantizes to FP8.","tail.outNote":"The final store writes \u003cstrong>E4M3 FP8\u003c/strong> directly for the output projection. Partial computation and merging keep their existing formats.","tail.unfusedOut":"The epilogue writes the FP8 tensor consumed by the output projection.","chart.prefillRow":"\u003cdiv class=\"bench-row\">\u003cdiv class=\"bench-row-title\">\u003cspan>{0} input tokens / request\u003c/span>\u003cspan class=\"bench-gain\">−{1}%\u003c/span>\u003c/div>{2}{3}\u003c/div>","chart.uniform":"32 requests · ≈8K each","load.splits":"{0} splits per row","load.budget":"Target: {0} tiles"}</script>
+<script>/* Original SM120 schematic. Geometry is illustrative; memory paths follow the kernels. */
+'use strict';
+(() => {
+  const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const operations = {
+    norm: {
+      name: ['Residual / RMSNorm / NVFP4', '残差 / RMSNorm / NVFP4'],
+      input: ['x + residual + γ', 'x + residual + γ'],
+      value: ['BF16 y · 5120 values', 'BF16 y · 5120 个值'],
+      arithmetic: ['Add → RMSNorm', '残差相加 → RMSNorm'],
+      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
+      shared: ['10 warp partials → warp 0', '10 个 Warp 的部分和 → Warp 0'],
+      bytes: ['10 KiB / direction / token', '10 KiB / 方向 / Token'],
+      output: ['FP4 + scales; BF16 residual', 'FP4 + Scale；BF16 残差'],
+      next: ['Next: NVFP4 GEMM', '下游：NVFP4 GEMM'],
+      kept: ['BF16 rounding in RF → FP4 packing', 'RF 内保留 BF16 舍入 → FP4 打包'],
+    },
+    front: {
+      name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 追加'],
+      input: ['QKV projection + γ', 'QKV 投影 + γ'],
+      value: ['BF16 K · 256 values / head', 'BF16 K · 256 个值 / Head'],
+      arithmetic: ['QK Norm → RoPE', 'QK Norm → RoPE'],
+      pack: ['group16 → NVFP4', 'group16 → NVFP4'],
+      shared: ['4 warp partials → warp 0', '4 个 Warp 的部分和 → Warp 0'],
+      bytes: ['512 B / direction / K head', '512 B / 方向 / K Head'],
+      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q / gate：BF16；K/V：FP4 + Scale'],
+      next: ['Next: paged XQA', '下游：Paged XQA'],
+      kept: ['K: Norm → RoPE → pack; V: pack', 'K：Norm → RoPE → 打包；V：直接打包'],
+    },
+    tail: {
+      name: ['Attention output / gate / FP8', 'Attention 输出 / Gate / FP8'],
+      input: ['Attention result + gate', 'Attention 结果 + Gate'],
+      value: ['BF16 O · 1536 values / rank', 'BF16 O · 1536 个值 / Rank'],
+      arithmetic: ['Normalize / final merge', '归一化 / 最终合并'],
+      pack: ['Gate → E4M3', 'Gate → E4M3'],
+      shared: ['', ''],
+      bytes: ['3 KiB / direction / token / rank', '3 KiB / 方向 / Token / Rank'],
+      output: ['8 E4M3 values / 8 B store', '8 个 E4M3 / 8 B 写出'],
+      next: ['Next: FP8 output projection', '下游：FP8 输出投影'],
+      kept: ['Final writer: BF16 gate → FP8 packing', '最终 Writer：BF16 Gate → FP8 打包'],
+    },
+  };
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  window.renderSmDiagram = (host, kind, fused, step) => {
+    const operation = operations[kind];
+    if (!host || !operation) return;
+    const chinese = document.documentElement.lang.startsWith('zh');
+    const pick = pair => pair[chinese ? 1 : 0];
+    const local = (en, zh) => chinese ? zh : en;
+    const phase = Math.max(0, Math.min(2, Number(step) || 0));
+    const width = Math.floor(host.clientWidth || host.getBoundingClientRect().width || 800);
+    if (width < 1) return;
+    const compact = width < 680;
+    const id = `sm-${kind}`;
+    const family = getComputedStyle(host).fontFamily;
+    const measure = (text, size) => {
+      if (!context) return Array.from(text).length * size * .65;
+      context.font = `${size}px ${family}`;
+      return context.measureText(text).width;
+    };
+    function wrap(value, available, size) {
+      const tokens = String(value).match(/[\u3400-\u9fff]|[^\s\u3400-\u9fff]+|\s+/g) || [];
+      const lines = [];
+      let line = '';
+      for (const token of tokens) {
+        if (measure(line + token, size) <= available) { line += token; continue; }
+        if (line.trim()) lines.push(line.trim());
+        line = token.trimStart();
+        while (measure(line, size) > available && line.length > 1) {
+          let end = 1;
+          while (end < line.length && measure(line.slice(0, end + 1), size) <= available) end++;
+          lines.push(line.slice(0, end));
+          line = line.slice(end);
+        }
+      }
+      if (line.trim()) lines.push(line.trim());
+      return lines;
+    }
+    const text = (x, y, value, available, cls = 'sm-label', anchor = 'start') => {
+      const size = cls === 'sm-eyebrow' ? 12 : ['sm-heading', 'sm-phase'].includes(cls) ? 16 : 14;
+      const lines = wrap(value, available, size);
+      return `<text x="${x}" y="${y}" class="${cls}" text-anchor="${anchor}">${lines.map((line, i) => `<tspan x="${x}" dy="${i ? size + 4 : 0}">${escape(line)}</tspan>`).join('')}</text>`;
+    };
+    const rect = (x, y, w, h, cls = 'sm-unit', radius = 5) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" class="${cls}"/>`;
+    const route = (d, color, active = true, extra = '') => `<path d="${d}" class="sm-route sm-${color}${active ? ' is-current' : ''} ${extra}" marker-end="url(#${id}-${color})"/>`;
+    let drawing = '';
+
+    // Layout uses the host's CSS width as SVG units, keeping labels at their CSS size.
+    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终 O + 加载的 Gate') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
+    const sm = {x: 8, y: 72, w: compact ? width - 16 : width - 210};
+    const part = {x: compact ? 38 : 24, y: compact ? 160 : 174, w: compact ? width - 76 : sm.w - 32};
+    const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 14).length * 18;
+    const rf = {x: part.x + 12, y: part.y + 15 + schedulerHeight + 18, w: part.w - 24};
+    rf.h = 48 + wrap(rfValue, rf.w - 20, 14).length * 18;
+    const gap = 10;
+    const available = part.w - 24;
+    const half = (available - gap) / 2;
+    const unit = (x, y, w, h) => ({x, y, w, h, cx: x + w / 2, right: x + w, bottom: y + h});
+    const start = part.x + 12;
+    const cuda = unit(start, rf.y + rf.h + 28, compact ? half : (available - 3 * gap) * .32, compact ? 156 : 144);
+    const tensor = unit(cuda.right + gap, cuda.y, compact ? half : (available - 3 * gap) * .28, cuda.h);
+    const sfu = unit(compact ? start : tensor.right + gap, compact ? cuda.bottom + 16 : cuda.y, compact ? half : (available - 3 * gap) * .18, compact ? 112 : cuda.h);
+    const ldst = unit(sfu.right + gap, sfu.y, compact ? half : (available - 3 * gap) * .22, sfu.h);
+    part.h = ldst.bottom + 18 - part.y;
+    const sharedTitle = compact && kind !== 'tail' ? local('L1 / shared', 'L1 / 共享内存') : local('L1 cache / shared · 128 KB', 'L1 缓存 / 共享内存 · 128 KB');
+    const sharedBody = compact && kind !== 'tail' ? `128 KB · ${pick(operation.shared)}` : pick(operation.shared);
+    const blockHeight = (title, body, w) => wrap(title, w - 20, 16).length * 20 + (body ? 10 + wrap(body, w - 20, 14).length * 18 : 0);
+    const shared = {x: part.x, y: part.y + part.h + 18, w: part.w, h: blockHeight(sharedTitle, sharedBody, part.w) + 24};
+    sm.h = shared.y + shared.h + 20 - sm.y;
+    const memoryDetail = phase === 1 && fused ? '' : kind === 'tail' && fused && phase === 0 ? local('BF16 gate input', 'BF16 Gate 输入') : phase === 1 ? pick(operation.value) : phase === 0 ? pick(operation.input) : pick(operation.output);
+    const memoryNote = phase === 1 && !fused ? pick(operation.bytes) : phase === 2 ? pick(operation.next) : local('Global address space', '全局地址空间');
+    const memoryBody = [memoryDetail, memoryNote].filter(Boolean).join(' · ');
+    const memory = {x: compact ? 38 : width - 180, w: compact ? width - 76 : 164};
+    memory.h = blockHeight('GPU L2 cache', memoryBody, memory.w) + 28;
+    const gddr = {x: memory.x, w: memory.w, h: blockHeight('GDDR7', local('Device VRAM', '设备显存'), memory.w) + 28};
+    memory.y = compact ? sm.y + sm.h + 64 : sm.y + (sm.h - memory.h - 64 - gddr.h) / 2;
+    gddr.y = memory.y + memory.h + 64;
+    const title = `${pick(operation.name)} · ${local(fused ? 'Fused path' : 'Native path', fused ? '融合路径' : '原生路径')}`;
+    const stages = [local('01 · Load into registers', '01 · 加载到寄存器'), local(fused ? '02 · Compute and pack in SM' : '02 · Materialize BF16, then reload', fused ? '02 · SM 内计算并打包' : '02 · BF16 写出，再读回'), local('03 · Write the consumer format', '03 · 写出下游所需格式')];
+    drawing += text(8, 18, local('RTX BLACKWELL · ONE SM', 'RTX BLACKWELL · 单个 SM'), width - 16, 'sm-eyebrow');
+    drawing += text(8, 42, stages[phase], width - 16, 'sm-phase');
+    drawing += rect(sm.x, sm.y, sm.w, sm.h, 'sm-boundary', 8);
+    drawing += text(sm.x + 14, sm.y + 23, local('Streaming Multiprocessor', '流式多处理器 SM'), sm.w - 28, 'sm-heading');
+    const miniGap = compact ? 5 : 9;
+    const miniWidth = (sm.w - 28 - miniGap * 3) / 4;
+    for (let index = 0; index < 4; index++) {
+      const x = sm.x + 14 + index * (miniWidth + miniGap);
+      drawing += rect(x, 108, miniWidth, 34, `sm-partition${index === 0 ? ' is-expanded' : ''}`, 3);
+      drawing += text(x + miniWidth / 2, 131, `SMSP ${index}`, miniWidth - 8, 'sm-small', 'middle');
+    }
+    drawing += `<path d="M${sm.x + 14 + miniWidth / 2} 142 V152 H${part.x + 12} V${part.y}" class="sm-expansion"/>`;
+    drawing += rect(part.x, part.y, part.w, part.h, 'sm-expanded', 6);
+    drawing += rect(part.x + 12, part.y + 15, part.w - 24, schedulerHeight, 'sm-unit');
+    drawing += text(part.x + part.w / 2, part.y + 15 + 10 + 14, local('Warp scheduler / dispatch', 'Warp 调度器 / Dispatch'), part.w - 38, 'sm-label', 'middle');
+    drawing += rect(rf.x, rf.y, rf.w, rf.h, `sm-register${phase === 1 && fused ? ' is-current' : ''}`);
+    drawing += text(rf.x + rf.w / 2, rf.y + 23, local('Register file · RF', '寄存器文件 · RF'), rf.w - 20, 'sm-heading', 'middle');
+    drawing += text(rf.x + rf.w / 2, rf.y + 45, rfValue, rf.w - 20, 'sm-small', 'middle');
+    const stripeWidth = (rf.w - 28) / 8;
+    for (let stripe = 0; stripe < 8; stripe++) drawing += rect(rf.x + 10 + stripe * (stripeWidth + 1), rf.y + rf.h - 12, stripeWidth - 2, 5, 'sm-register-stripe', 1);
+
+    const cell = (box, title, subtitle, cls = '', key = '') => {
+      let node = rect(box.x, box.y, box.w, box.h, `sm-unit ${cls}`);
+      const top = box.y + (box.h - blockHeight(title, subtitle, box.w)) / 2;
+      node += text(box.cx, top + 16, title, box.w - 20, 'sm-heading', 'middle');
+      if (subtitle) node += text(box.cx, top + wrap(title, box.w - 20, 16).length * 20 + 10 + 14, subtitle, box.w - 20, 'sm-small', 'middle');
+      drawing += `<g class="sm-node"${key ? ` data-sm-node="${key}"` : ''}>${node}</g>`;
+    };
+    drawing += rect(cuda.x, cuda.y, cuda.w, cuda.h, `sm-unit${phase === 1 ? ' is-compute' : ''}`);
+    drawing += text(cuda.cx, cuda.y + 25, compact ? 'CUDA' : local('CUDA lanes', 'CUDA 通道'), cuda.w - 16, 'sm-heading', 'middle');
+    // Thirty-two FP32 lanes per partition; the tiny matrix below is one Tensor Core.
+    for (let lane = 0; lane < 32; lane++) {
+      const tile = (cuda.w - 22) / 8;
+      drawing += rect(cuda.x + 8 + (lane % 8) * tile, cuda.y + 44 + Math.floor(lane / 8) * 6, tile - 2, 4, 'sm-cuda-lane', 0);
+    }
+    const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: 'Final merge'}[kind];
+    const arithmetic = compact ? compactArithmetic : pick(operation.arithmetic);
+    const pack = compact && kind !== 'tail' ? 'NVFP4 group16' : pick(operation.pack);
+    const computeLabel = phase === 0 ? arithmetic : fused || phase === 2 ? pack : arithmetic;
+    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 通道'), cuda.w - 16, 'sm-small', 'middle');
+    drawing += text(cuda.cx, cuda.y + 115, computeLabel, cuda.w - 16, 'sm-small', 'middle');
+    drawing += rect(tensor.x, tensor.y, tensor.w, tensor.h, 'sm-unit');
+    drawing += text(tensor.cx, tensor.y + 25, 'Tensor Core', tensor.w - 16, 'sm-heading', 'middle');
+    const matrixSize = Math.min(36, tensor.w - 24);
+    for (let tile = 0; tile < 12; tile++) {
+      drawing += rect(tensor.cx - matrixSize / 2 + tile % 4 * matrixSize / 4, tensor.y + 61 + Math.floor(tile / 4) * 6, matrixSize / 4 - 2, 4, 'sm-tensor-tile', 0);
+    }
+    drawing += text(tensor.cx, tensor.y + 113, local('5th gen · MMA', '第五代 · MMA'), tensor.w - 16, 'sm-small', 'middle');
+    cell(sfu, 'SFU', local('Reciprocal / exp', '倒数 / 指数'), '', 'sfu');
+    const loadStoreState = phase === 1 && fused && kind === 'tail' ? '' : `is-${phase === 0 ? 'load' : phase === 2 ? 'output' : fused ? 'compute' : 'native'}`;
+    cell(ldst, 'LD/ST', local('Global / shared', '全局 / 共享'), loadStoreState, 'ldst');
+
+    cell({...shared, cx:shared.x + shared.w / 2}, sharedTitle, sharedBody, `sm-shared${fused && phase === 1 && kind !== 'tail' ? ' is-current' : ''}`);
+
+    // Global traffic goes directly between LD/ST and L2, beside the shared-memory block.
+    const port = compact ? ldst.y + 28 : ldst.y + 36;
+    const corridor = compact ? width - 18 : width - 194;
+    const memoryIn = memory.y + 28;
+    const loadRegister = compact ? `M${ldst.right} ${port} H${part.x + part.w - 3} V${rf.y + 28} H${rf.x + rf.w}` : `M${ldst.cx} ${ldst.y} V${rf.y + rf.h}`;
+    const storeRegister = compact ? `M${rf.x + rf.w} ${rf.y + 42} H${part.x + part.w - 8} V${port + 12} H${ldst.right}` : `M${ldst.cx + 8} ${rf.y + rf.h} V${ldst.y}`;
+    if (phase === 0) drawing += route(loadRegister, 'load');
+    if (phase === 1 && !fused) drawing += route(loadRegister, 'native') + route(storeRegister, 'native');
+    if (phase === 1 && fused && kind !== 'tail') drawing += route(loadRegister, 'fused') + route(storeRegister, 'fused');
+    if (phase === 2) drawing += route(storeRegister, 'output');
+    drawing += route(`M${cuda.cx} ${rf.y + rf.h} V${cuda.y}`, phase === 1 && !fused ? 'native' : 'fused', phase === 1);
+    if (phase === 1) drawing += route(`M${cuda.cx + 10} ${cuda.y} V${rf.y + rf.h}`, fused ? 'fused' : 'native');
+    if (phase === 0) {
+      drawing += route(`M${memory.x + (compact ? memory.w : 0)} ${memoryIn} H${corridor} V${port} H${ldst.right}`, 'load');
+    } else if (phase === 1 && !fused) {
+      drawing += route(`M${ldst.right} ${port} H${corridor} V${memoryIn} H${memory.x + (compact ? memory.w : 0)}`, 'native');
+      drawing += route(`M${memory.x + (compact ? memory.w : 0)} ${memoryIn + 28} H${corridor - 10} V${port + 24} H${ldst.right}`, 'native');
+    } else if (phase === 2) {
+      drawing += route(`M${ldst.right} ${port} H${corridor} V${memoryIn} H${memory.x + (compact ? memory.w : 0)}`, 'output');
+    }
+    if (kind !== 'tail') {
+      drawing += route(`M${ldst.cx - 4} ${ldst.bottom} V${shared.y}`, 'fused', fused && phase === 1);
+      drawing += route(`M${ldst.cx + 4} ${shared.y} V${ldst.bottom}`, 'fused', fused && phase === 1);
+    }
+
+    drawing += text(memory.x + memory.w / 2, memory.y - 15, local('Outside this SM', 'SM 之外'), memory.w, 'sm-small', 'middle');
+    cell({...memory, cx:memory.x + memory.w / 2}, 'GPU L2 cache', memoryBody, 'sm-memory', 'l2');
+    cell({...gddr, cx:gddr.x + gddr.w / 2}, 'GDDR7', local('Device VRAM', '设备显存'), 'sm-memory', 'gddr');
+    const center = memory.x + memory.w / 2;
+    drawing += route(phase === 0 ? `M${center} ${gddr.y} V${memory.y + memory.h}` : `M${center} ${memory.y + memory.h} V${gddr.y}`, phase === 0 ? 'load' : phase === 1 && !fused ? 'native' : 'output', false, `is-conditional${phase === 1 && fused ? ' is-context' : ''}`);
+    if (phase === 1 && !fused) drawing += route(`M${center - 6} ${gddr.y} V${memory.y + memory.h}`, 'native', false, 'is-conditional');
+    drawing += text(center + 10, memory.y + memory.h + 26, local('Miss / eviction', '未命中 / 驱逐'), memory.w / 2 - 14, 'sm-small');
+
+    const captionY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
+    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', 'Gate：L2 → LD/ST → RF；最终 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
+    drawing += text(8, captionY, caption, width - 16, 'sm-path-caption');
+    const footerY = captionY + wrap(caption, width - 16, 14).length * 18 + 10;
+    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '输出写出')]];
+    const columns = compact ? 2 : 4;
+    const legendRowHeight = compact ? 42 : 24;
+    legend.forEach(([color, label], index) => {
+      const x = 8 + index % columns * (width - 16) / columns;
+      const y = footerY + Math.floor(index / columns) * legendRowHeight;
+      drawing += `<path d="M${x} ${y - 4} h18" class="sm-route sm-${color} is-current"/>`;
+      drawing += text(x + 25, y, label, (width - 16) / columns - 30, 'sm-small');
+    });
+    const height = footerY + (compact ? legendRowHeight * 2 : legendRowHeight);
+    const defs = ['load', 'native', 'fused', 'output'].map(color => `<marker id="${id}-${color}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" class="sm-arrow-${color}"/></marker>`).join('');
+    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '四个 SMSP，展开其中一个。打包在 CUDA 通道执行；L1/共享内存是独立协作路径。GDDR7 流量取决于 L2 未命中或驱逐。')} ${caption}`;
+    host.innerHTML = `<svg class="sm-svg" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="${id}-title ${id}-desc" xmlns="http://www.w3.org/2000/svg"><title id="${id}-title">${escape(title)}</title><desc id="${id}-desc">${escape(description)}</desc><defs>${defs}</defs>${drawing}</svg>`;
+  };
+})();
+
+/* Qwen SM120 interactive article. All diagrams are deterministic, local and manually stepped. */
 'use strict';
 (() => {
   const $ = (s, root=document) => root.querySelector(s);
@@ -3080,10 +3257,10 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   const rc = (i) => colors[i % colors.length];
   const fmt = (n,d=2) => Number(n).toFixed(d);
   const tx = (x,y,s,cls='diagram-label',attrs='') => `<text x="${x}" y="${y}" class="${cls}" ${attrs}>${esc(s)}</text>`;
-  const rect = (x,y,w,h,fill='var(--panel-2)',stroke='var(--border)',r=5,attrs='') => `<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${h}" rx="${r}" fill="${fill}" stroke="${stroke}" ${attrs}/>`;
+  const rect = (x,y,w,h,fill='transparent',stroke='var(--border)',r=5,attrs='') => `<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${h}" rx="${r}" fill="${fill}" stroke="${stroke}" ${attrs}/>`;
   const path = (d,active=false,id='',attrs='') => `<path d="${d}" class="diagram-edge ${active?'active flow-active':''}" ${id?`marker-end="url(#${id}-arrow)"`:''} ${attrs}/>`;
   function box(x,y,w,h,title,subtitle='',active=false,extra='') {
-    return `<g ${extra}>${rect(x,y,w,h,active?'var(--accent-soft)':'var(--panel-2)',active?'var(--accent)':'var(--border)',7)}${tx(x+w/2,y+h/2+(subtitle?-3:5),title,'diagram-title','text-anchor="middle"')}${subtitle?tx(x+w/2,y+h/2+15,subtitle,'diagram-small','text-anchor="middle"'):''}</g>`;
+    return `<g ${extra}>${rect(x,y,w,h,active?'var(--accent-soft)':'transparent',active?'var(--accent)':'var(--border)',7)}${tx(x+w/2,y+h/2+(subtitle?-3:5),title,'diagram-title','text-anchor="middle"')}${subtitle?tx(x+w/2,y+h/2+15,subtitle,'diagram-small','text-anchor="middle"'):''}</g>`;
   }
   function svg(holder,inner,w,h,label,animate=false){
     const el=typeof holder==='string'?document.getElementById(holder):holder;
@@ -3261,11 +3438,11 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     a+=box(214,117,125,58,'H2D Stream',msg('rank.shared'),active(1));
     a+=rect(367,100,175,105,active(1)?'var(--accent-soft)':'var(--panel-2)',active(1)?'var(--accent)':'var(--border)',7);
     a+=tx(454,122,'Receive Arena','diagram-title','text-anchor="middle"');
-    [msg('rank.current'),msg('rank.ahead1'),msg('rank.ahead2')].forEach((t,i)=>{a+=rect(380,132+i*22,149,17,i===0?'var(--blue-soft)':'var(--panel)','var(--border)',3)+tx(454,144+i*22,t,'diagram-small diagram-mono','text-anchor="middle"');});
+    [msg('rank.current'),msg('rank.ahead1'),msg('rank.ahead2')].forEach((t,i)=>{a+=rect(380,132+i*22,149,17,i===0?'var(--blue-soft)':'transparent','var(--border)',3)+tx(454,144+i*22,t,'diagram-small diagram-mono','text-anchor="middle"');});
     a+=box(367,249,175,61,'Compute Stream',msg('rank.interleave'),active(2));
     a+=rect(581,230,151,88,active(3)?'var(--accent-soft)':'var(--panel-2)',active(3)?'var(--accent)':'var(--border)',7);
     a+=tx(656,251,'Source Arena','diagram-title','text-anchor="middle"');
-    a+=rect(592,264,62,37,'var(--panel)','var(--border)',4)+rect(660,264,62,37,'var(--panel)','var(--border)',4);
+    a+=rect(592,264,62,37,'transparent','var(--border)',4)+rect(660,264,62,37,'transparent','var(--border)',4);
     a+=tx(623,279,'Slot 0','diagram-small diagram-mono','text-anchor="middle"')+tx(623,293,msg('rank.sendPrev'),'diagram-small','text-anchor="middle"')+tx(691,279,'Slot 1','diagram-small diagram-mono','text-anchor="middle"')+tx(691,293,msg('rank.writeNext'),'diagram-small','text-anchor="middle"');
     a+=box(581,117,151,58,'D2H Stream',msg('rank.shared'),active(3));
     a+=box(795,92,150,66,msg('rank.to2'),'Forward / Edge1',active(3));a+=box(795,218,150,66,msg('rank.to0'),'Return / Edge6',active(3));
@@ -3387,8 +3564,8 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
     svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
     metrics('load-metrics', [
-      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', `${native.splits} splits / padded request`],
-      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', `Budget = ${bucket.budget}`],
+      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', msg('load.splits', native.splits)],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', msg('load.budget', bucket.budget)],
       [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
     ]);
     const note = loadPreset === 'uniform'
@@ -3468,28 +3645,13 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   }
 
   // ---------- Three consumer-format fusions ----------
-  const fusionStates={norm:{mode:'after',step:2},front:{mode:'after',step:2},tail:{mode:'after',step:2}};
+  const fusionStates={norm:{mode:'after',step:1},front:{mode:'after',step:1},tail:{mode:'after',step:1}};
   function renderFusion(kind){
     const holder=$(`#${kind}-widget`),state=fusionStates[kind],after=state.mode==='after',step=state.step;
     const stageNames=kind==='norm'?[msg('fusion.readInput'),msg('fusion.normQuant'),msg('fusion.gemm')]:kind==='front'?[msg('fusion.readProj'),msg('fusion.qkv'),msg('fusion.store')]:[msg('fusion.final'),msg('fusion.gateQuant'),msg('fusion.project')];
     steps($('.fusion-steps',holder),stageNames,step,i=>{state.step=i;renderFusion(kind);});
     $$('.fusion-mode button',holder).forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode)));
-    const map = messages['memory.' + kind];
-    const node = ([title, detail]) =>
-      `<div class="memory-node"><strong>${esc(title)}</strong><small>${esc(detail)}</small></div>`;
-    const rows = after ? ['load', 'local', 'output'] : ['load', 'store', 'reload', 'output'];
-    const route = rows.map(key => {
-      const [compute, memory] = map[key];
-      const stage = key === 'load' ? 0 : key === 'output' ? 2 : 1;
-      const active = stage === step ? ' current' : '';
-      if (key === 'local') {
-        return `<div class="memory-hop local${active}">${node(compute)}<p class="memory-saving">${esc(memory)}</p></div>`;
-      }
-      const write = key === 'store' || key === 'output';
-      const transfer = `<div class="memory-direction"><span aria-hidden="true">${write?'→':'←'}</span><span>${msg(write?'memory.store':'memory.load')}</span></div>`;
-      return `<div class="memory-hop${active}">${node(compute)}${transfer}${node(memory)}</div>`;
-    });
-    $('.memory-map', holder).innerHTML = `<div class="memory-head"><span>${msg('memory.sm')}</span><span>${msg('memory.global')}</span></div>` + route.join('');
+    renderSmDiagram($('.sm-architecture', holder), kind, after, step);
     const texts={
       norm:[
         msg('norm.inputNote'),
@@ -3505,16 +3667,29 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
         after?msg('tail.outNote'):msg('tail.unfusedOut')
       ]
     };
-    $('.fusion-explanation',holder).innerHTML=`<span class="ex-label">${msg(after?'fusion.fused':'fusion.native')} · ${step+1} / 3</span>${texts[kind][step]}`;
+    $('.fusion-explanation',holder).innerHTML=texts[kind][step];
   }
   $$('.fusion-widget').forEach(h=>{const kind=h.dataset.kind;$('.fusion-mode',h).addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(b){fusionStates[kind].mode=b.dataset.mode;renderFusion(kind);}});});
+
+  const figureWidths = new WeakMap();
+  const resizeArchitecture = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      const width = Math.round(entry.contentRect.width);
+      if (!width || figureWidths.get(entry.target) === width) continue;
+      figureWidths.set(entry.target, width);
+      const kind = entry.target.closest('.fusion-widget').dataset.kind;
+      const state = fusionStates[kind];
+      renderSmDiagram(entry.target, kind, state.mode === 'after', state.step);
+    }
+  });
+  $$('.sm-architecture').forEach(host => resizeArchitecture.observe(host));
 
   // ---------- Measured benchmark charts ----------
   const data=JSON.parse($('#benchmark-data').textContent);let prefillMetric='relative';
   function barline(name,value,width,baseline){return `<div class="barline"><span class="barname">${name}</span><div class="bartrack"><div class="barfill ${baseline?'baseline':''}" style="width:${Math.min(100,width)}%"></div></div><span class="barvalue">${value}</span></div>`;}
   function renderPrefill(){const max=Math.max(...data.prefill.map(r=>+r.cpp_ms));$('#prefill-chart').innerHTML=data.prefill.map(r=>{const c=+r.cpp_ms,v=+r.vpp_ms,rel=prefillMetric==='relative',scale=rel?c:max;return msg('chart.prefillRow', r.input_tokens==='131071'?'128K':(+r.input_tokens/1024)+'K', fmt((c-v)/c*100), barline('CPP',rel?'100.0%':fmt(c/1000,3)+' s',c/scale*100,true), barline('VPP',rel?fmt(v/c*100,1)+'%':fmt(v/1000,3)+' s',v/scale*100,false));}).join('');$$('#prefill-metric button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===prefillMetric)));}
   $('#prefill-metric').addEventListener('click',e=>{const b=e.target.closest('button[data-value]');if(b){prefillMetric=b.dataset.value;renderPrefill();}});
-  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'B9 · 128K + 8 × 4K','B32 · 128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
+  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'≈128K + 8 × 4K','≈128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
 
   renderPipe();renderRank();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
   // Deterministic model functions are exposed for reproducibility and automated checks.

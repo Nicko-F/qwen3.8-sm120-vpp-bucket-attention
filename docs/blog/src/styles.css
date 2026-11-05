@@ -94,8 +94,8 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 18px;
-  line-height: 1.75;
+  font-size: 16px;
+  line-height: 1.625;
 }
 
 .article-shell {
@@ -111,6 +111,7 @@ body {
 #article {
   min-width: 0;
   padding: 0;
+  container: article / inline-size;
 }
 
 .prose, .wide {
@@ -120,8 +121,8 @@ body {
 }
 
 .prose p, .experiment-body p {
-  font-size: 18px;
-  line-height: 1.85;
+  font-size: 16px;
+  line-height: 1.625;
   color: var(--ink-2);
 }
 
@@ -164,20 +165,18 @@ summary:focus-visible,
 
 h1, h2, h3, h4 {
   color: var(--ink);
-  line-height: 1.4;
+  line-height: 1.35;
   margin: 0;
   font-weight: 600;
   text-wrap: pretty;
 }
 
 h2 {
-  font-size: 32px;
-  letter-spacing: -.015em;
+  font-size: 24px;
 }
 
 h3 {
-  font-size: 24px;
-  letter-spacing: -.01em;
+  font-size: 20px;
   margin: 2.25rem 0 1rem;
 }
 
@@ -225,7 +224,7 @@ pre code {
   line-height: 1.8;
 }
 
-.equation, .table-wrap, .svg-scroll, pre {
+.table-wrap, .svg-scroll, pre {
   overscroll-behavior-x: contain;
 }
 
@@ -535,18 +534,20 @@ summary > span {
 }
 
 .hero h1 {
-  font-size: 48px;
-  letter-spacing: -.025em;
+  text-wrap: balance;
+  font-size: 36px;
+  letter-spacing: 0;
   line-height: 1.25;
   font-weight: 600;
 }
 
 .hero-accent {
+  white-space: nowrap;
   color: var(--accent-strong);
 }
 
 .hero-subtitle {
-  font-size: 24px;
+  font-size: 18px;
   line-height: 1.5;
   letter-spacing: 0;
   font-weight: 400;
@@ -554,12 +555,6 @@ summary > span {
   color: var(--ink);
 }
 
-.hero-deck {
-  font-size: 18px;
-  line-height: 1.85;
-  color: var(--ink-2);
-  margin-bottom: 16px;
-}
 
 .hero-meta {
   display: flex;
@@ -612,6 +607,10 @@ summary > span {
   font-weight: 500;
 }
 
+.repo-symbol, .repo-arrow {
+  flex: none;
+}
+
 .repo-symbol {
   font-size: 23px;
   color: var(--accent);
@@ -657,15 +656,20 @@ summary > span {
 }
 
 .hero-results strong {
-  font-size: 32px;
+  font-size: 26px;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -.02em;
+  letter-spacing: normal;
   white-space: nowrap;
   font-weight: 600;
 }
 
-.hero-results strong span {
+.metric-range .dash {
+  margin-inline: .16em;
+  font-weight: 400;
+}
+
+.hero-results strong .unit {
   margin-inline-start: 2px;
   font-size: .63em;
   font-weight: 500;
@@ -777,94 +781,30 @@ summary > span {
 }
 
 .chapter-heading h2 {
-  font-size: 32px;
+  font-size: 24px;
 }
 
 /* Equations and the folded pipeline topology. */
 .equation {
-  background: none;
-  padding: 12px 4px;
-  margin: 24px 0 28px;
-  line-height: 2.1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .45em .3em;
+  margin: 1.2em 0 1.5em;
+  padding: .15em 0;
   color: var(--ink);
-  overflow: auto;
-  border-block: 0;
-  scrollbar-width: thin;
 }
 
-.equation > span {
+.equation math {
   font-family: var(--math);
-  font-size: 19px;
-  white-space: nowrap;
-  display: block;
-  width: max-content;
-  margin-inline: auto;
-}
-
-.equation small {
-  font-size: 15px;
-  color: var(--muted);
-  display: block;
-  margin-top: 14px;
-  line-height: 1.7;
-  text-align: start;
-}
-
-.equation.compact > span {
-  font-size: 19px;
-}
-
-.fraction {
-  display: inline-flex;
-  flex-direction: column;
-  text-align: center;
-  vertical-align: middle;
-  line-height: 1.4;
-  font-size: .88em;
-  padding: 0 4px;
-}
-
-.fraction > span:first-child {
-  border-bottom: 1px solid currentColor;
-  padding: 0 6px;
-}
-
-.fraction > span:last-child {
-  padding: 0 6px;
-}
-
-.sum {
-  display: inline-block;
-  position: relative;
-  font-size: 1.25em;
-  margin: 0 10px 0 8px;
-  line-height: 1.9;
-}
-
-.sum sub, .sum sup {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: .55em;
-}
-
-.sum sub {
-  bottom: .1em;
-}
-
-.sum sup {
-  top: .1em;
-}
-
-.paren {
-  font-size: 1.4em;
-  vertical-align: -.05em;
+  font-size: 1.08rem;
 }
 
 .topology {
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--panel);
+  background: transparent;
   padding: 18px;
   margin: 26px 0 30px;
   overflow-x: auto;
@@ -909,7 +849,7 @@ summary > span {
 }
 
 .topology-row.returning > span {
-  background: color-mix(in srgb, var(--purple) 12%, var(--panel));
+  background: color-mix(in srgb, var(--purple) 12%, transparent);
   color: var(--ink-2);
 }
 
@@ -922,17 +862,67 @@ summary > span {
   min-width: 620px;
 }
 
+@container article (max-width: 42rem) {
+  .topology {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 14px;
+    padding: 14px 12px;
+  }
+
+  .topology-row {
+    grid-row: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .topology-row.returning {
+    grid-column: 2;
+  }
+
+  .topology-row > span {
+    width: 100%;
+    padding: 8px 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .topology-row i {
+    line-height: 1;
+    transform: rotate(90deg);
+  }
+
+  .fold-arrow {
+    grid-area: 2 / 1 / 3 / -1;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .fold-arrow span {
+    display: inline-block;
+    transform: rotate(-90deg);
+  }
+}
+
 /* Article figures: flush headings/captions around bounded canvases. */
 .interactive, .data-figure {
-  background: var(--panel);
+  container: figure / inline-size;
+  background: transparent;
 }
 
 .figure-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.figure-header > div:not(.segmented) {
+  flex: 1 1 22rem;
+  overflow-wrap: anywhere;
 }
 
 .figure-kicker {
@@ -961,6 +951,8 @@ summary > span {
   color: var(--muted);
   white-space: normal;
   flex-shrink: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .figure-controls {
@@ -978,15 +970,17 @@ summary > span {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
   max-width: 100%;
 }
 
 .figure-controls select {
-  background: var(--panel);
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--ink);
   padding: 7px 28px 7px 10px;
+  min-width: 0;
   max-width: 100%;
   font-size: 14px;
   line-height: 1.5;
@@ -1013,16 +1007,18 @@ summary > span {
   gap: 7px;
   border: 1px solid var(--border);
   padding: 8px 12px;
-  background: var(--panel);
+  background: transparent;
   border-radius: 4px;
   font-size: 14px;
   line-height: 1.5;
   color: var(--ink-2);
   transition: background .18s, border-color .18s, color .18s;
   min-height: 44px;
+  min-width: 0;
   max-width: 100%;
   text-align: start;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .stepper button:hover {
@@ -1041,6 +1037,7 @@ summary > span {
   font-size: 12px;
   opacity: .7;
   font-variant-numeric: tabular-nums;
+  flex: none;
 }
 
 .trace-pair {
@@ -1050,10 +1047,9 @@ summary > span {
 }
 
 .trace-panel {
-  background: var(--trace-bg);
+  background: transparent;
   border: 1px solid var(--trace-grid);
   border-radius: 4px;
-  overflow: hidden;
   color: var(--trace-ink);
 }
 
@@ -1072,6 +1068,7 @@ summary > span {
   color: var(--trace-ink);
   gap: 4px 12px;
   flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 
 .trace-title b {
@@ -1096,7 +1093,7 @@ summary > span {
   scrollbar-width: thin;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--panel-2);
+  background: transparent;
 }
 
 .svg-scroll svg {
@@ -1139,6 +1136,8 @@ summary > span {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .key {
@@ -1147,6 +1146,7 @@ summary > span {
   height: 9px;
   border-radius: 2px;
   background: var(--trace-forward);
+  flex: none;
 }
 
 .key.returning {
@@ -1168,6 +1168,7 @@ summary > span {
   font-size: 16px;
   line-height: 1.8;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
 .figure-explanation strong {
@@ -1245,14 +1246,15 @@ summary > span {
 
 .segmented {
   display: flex;
-  flex-shrink: 0;
-  background: var(--panel-2);
+  flex: 0 1 auto;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px;
   gap: 2px;
   flex-wrap: wrap;
   max-width: 100%;
+  min-width: 0;
 }
 
 .segmented button {
@@ -1265,10 +1267,13 @@ summary > span {
   border-radius: 2px;
   white-space: normal;
   min-height: 40px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .segmented button[aria-pressed=true] {
-  background: var(--panel);
+  background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
@@ -1356,7 +1361,7 @@ summary > span {
 .deep-dive {
   margin: 2rem 0 1rem;
   border-block: 1px solid var(--border);
-  background: var(--panel);
+  background: transparent;
 }
 
 .deep-dive > summary, .experiment > summary {
@@ -1368,6 +1373,7 @@ summary > span {
   cursor: pointer;
   line-height: 1.6;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 summary::-webkit-details-marker {
@@ -1417,13 +1423,13 @@ summary small {
 }
 
 .details-body h3 {
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .experiment {
   margin: 2rem 0 1rem;
   border-block: 1px solid var(--border);
-  background: var(--panel);
+  background: transparent;
 }
 
 .experiment > summary {
@@ -1445,7 +1451,7 @@ summary small {
 
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 0 24px;
   margin: 24px 0;
   padding: 4px 0;
@@ -1561,7 +1567,7 @@ tbody tr:hover {
 /* Supporting comparisons and data summaries. */
 .strategy-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 24px;
   margin: 28px 0 34px;
 }
@@ -1698,13 +1704,14 @@ tbody tr:hover {
 
 .fusion-result-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 24px;
   padding: 6px 0 24px;
 }
 
 .fusion-result-grid > div {
   min-width: 0;
+  overflow-wrap: anywhere;
   padding-block: 16px;
   border-top: 1px solid var(--border);
 }
@@ -1716,15 +1723,15 @@ tbody tr:hover {
 }
 
 .fusion-result-grid strong {
-  font-size: 30px;
-  letter-spacing: -.02em;
+  font-size: 26px;
+  letter-spacing: normal;
   display: block;
   margin: 8px 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.fusion-result-grid strong span {
+.fusion-result-grid strong .unit {
   font-size: 17px;
   color: var(--accent);
   margin-left: 3px;
@@ -1744,100 +1751,6 @@ tbody tr:hover {
   color: var(--accent-strong);
 }
 
-/* Fusion data paths keep the SM and global-memory columns visible together. */
-.fusion-diagram.memory-map {
-  overflow: visible;
-  padding: 16px 0;
-  border: 0;
-  border-block: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-}
-
-.memory-head, .memory-hop {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 4.5rem minmax(0, 1fr);
-  align-items: center;
-  gap: 16px;
-}
-
-.memory-head {
-  padding-bottom: 12px;
-  color: var(--ink-2);
-  font-size: 16px;
-  line-height: 1.5;
-  font-weight: 600;
-}
-
-.memory-head > span:first-child {
-  grid-column: 1;
-}
-
-.memory-head > span:last-child {
-  grid-column: 3;
-}
-
-.memory-hop {
-  padding-block: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.memory-hop.current {
-  background: var(--accent-soft);
-}
-
-.memory-node, .memory-saving {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.memory-hop > .memory-node {
-  grid-column: 1;
-}
-
-.memory-hop > .memory-direction + .memory-node {
-  grid-column: 3;
-}
-
-.memory-node strong {
-  display: block;
-  color: var(--ink);
-  font-size: 17px;
-  line-height: 1.5;
-  font-weight: 600;
-}
-
-.memory-node small {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink-2);
-  font-size: 15px;
-  line-height: 1.7;
-}
-
-.memory-direction {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent-strong);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.memory-direction > span:first-child {
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.memory-hop.local > .memory-saving {
-  grid-column: 2 / -1;
-  color: var(--ink-2);
-  font-size: 15px;
-  line-height: 1.75;
-}
-
 /* Closing text, sources, and article footer. */
 .closing {
   border-top: 1px solid var(--border);
@@ -1845,20 +1758,9 @@ tbody tr:hover {
   margin-top: 4rem;
 }
 
-.closing .eyebrow {
-  margin-bottom: 14px;
-}
-
 .closing h2 {
-  font-size: 30px;
+  font-size: 24px;
   margin-bottom: 24px;
-}
-
-.closing .closing-line {
-  font-size: 20px;
-  line-height: 1.7;
-  color: var(--ink);
-  margin: 28px 0;
 }
 
 .closing-repo {
@@ -1889,7 +1791,7 @@ tbody tr:hover {
 }
 
 .references h2 {
-  font-size: 26px;
+  font-size: 24px;
   margin-bottom: 16px;
 }
 
@@ -2040,7 +1942,7 @@ tbody tr:hover {
 }
 
 .diagram-node {
-  fill: var(--panel-2);
+  fill: none;
   stroke: var(--border);
   stroke-width: 1.2;
 }
@@ -2071,7 +1973,7 @@ tbody tr:hover {
 }
 
 .diagram-memory {
-  fill: color-mix(in srgb, var(--orange) 12%, var(--panel));
+  fill: color-mix(in srgb, var(--orange) 12%, transparent);
   stroke: var(--orange);
   stroke-width: 1;
 }
@@ -2244,20 +2146,16 @@ tbody tr:hover {
   }
 
   .hero h1 {
-    font-size: clamp(34px, 8.8vw, 44px);
-    letter-spacing: -.02em;
+    font-size: 30px;
+    letter-spacing: normal;
   }
 
   .hero-subtitle {
     margin: 14px 0 16px;
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1.5;
   }
 
-  .hero-deck {
-    line-height: 1.85;
-    font-size: 17px;
-  }
 
   .hero .eyebrow {
     gap: 8px;
@@ -2313,12 +2211,12 @@ tbody tr:hover {
   .hero-results strong {
     grid-column: 2;
     grid-row: 1 / span 2;
-    font-size: 30px;
+    font-size: 26px;
   }
 
   .prose p, .details-body .prose p, .experiment-body p {
-    line-height: 1.85;
-    font-size: 17px;
+    line-height: 1.625;
+    font-size: 16px;
   }
 
   .chapter-map {
@@ -2373,75 +2271,20 @@ tbody tr:hover {
   }
 
   .chapter-heading h2 {
-    font-size: 28px;
-    letter-spacing: -.01em;
+    font-size: 24px;
   }
 
   h3, .details-body h3 {
     margin-top: 28px;
-    font-size: 22px;
+    font-size: 20px;
   }
 
   /* Equations and the folded pipeline topology. */
-  .equation {
-    margin-block: 22px;
-    padding: 12px 2px;
-  }
-
-  .equation > span {
-    font-size: 18px;
-  }
-
-  .equation.compact > span {
-    font-size: 18px;
-  }
-
-  .topology {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px 14px;
-    padding: 14px 12px;
-  }
-
-  .topology-row {
-    grid-row: 1;
-    min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .topology-row.returning {
-    grid-column: 2;
-  }
-
-  .topology-row > span {
-    width: 100%;
-    padding: 8px 4px;
-  }
-
-  .topology-row i {
-    line-height: 1;
-    transform: rotate(90deg);
-  }
-
-  .fold-arrow {
-    grid-area: 2 / 1 / 3 / -1;
-    min-width: 0;
-    text-align: center;
-  }
-
-  .fold-arrow span {
-    display: inline-block;
-    transform: rotate(-90deg);
-  }
-
   figure {
     margin: 28px 0 34px;
   }
 
   .figure-header {
-    align-items: flex-start;
-    flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 14px;
   }
@@ -2461,10 +2304,6 @@ tbody tr:hover {
 
   .figure-controls label {
     gap: 6px;
-  }
-
-  .figure-controls select {
-    max-width: 100%;
   }
 
   .stepper {
@@ -2605,7 +2444,7 @@ tbody tr:hover {
 
   .fusion-result-grid strong {
     margin: 0;
-    font-size: 30px;
+    font-size: 26px;
   }
 
   .fusion-result-grid > div > span {
@@ -2619,11 +2458,7 @@ tbody tr:hover {
   }
 
   .closing h2 {
-    font-size: 27px;
-  }
-
-  .closing .closing-line {
-    font-size: 18px;
+    font-size: 24px;
   }
 
   .closing-repo {
@@ -2672,10 +2507,6 @@ tbody tr:hover {
     text-align: start;
   }
 
-  .memory-head, .memory-hop {
-    grid-template-columns: minmax(110px, 1fr) 2.5rem minmax(110px, 1fr);
-    gap: 6px;
-  }
 }
 
 @media (max-width:359px) {
@@ -2692,7 +2523,7 @@ tbody tr:hover {
   }
 
   .hero-results strong {
-    font-size: 28px;
+    font-size: 26px;
   }
 }
 
@@ -2725,7 +2556,7 @@ tbody tr:hover {
   body {
     background: #fff;
     color: #000;
-    font-size: 11pt;
+    font-size: 16px;
   }
 
   .site-header,

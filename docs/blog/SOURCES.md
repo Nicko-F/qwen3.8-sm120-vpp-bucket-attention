@@ -62,7 +62,7 @@ Task = request 区间与 Bucket 区间的交集
 - Norm 图保留 BF16 Residual，并把归一化结果直接打包为 NVFP4。
 - Front 图分别展示 Q/K 的 Norm → RoPE，以及 V 的量化写入路径。
 - Tail 图在最终 Attention 输出阶段执行 Gate 与 FP8，保留 Partial 合并格式。
-- 原生边界图按数据通路组织，Gate / Quant 等编译尾处理合并显示。
+- SM 图参照 NVIDIA《RTX Blackwell GPU Architecture》图 5 绘制。图中展开一个处理分区，标出寄存器文件、执行通道、LD/ST、SM 内共享内存及通向 GPU L2 的数据路径。虚线连接 L2 与 GDDR7，表示缓存未命中或驱逐。
 - 图中按每卡、每 token 计算一次 BF16 中间张量写回和重读的逻辑字节数。Norm 的 y 为 2 × 5120 × 2 B = 20 KiB，Front 的旋转 K 为 2 × 256 × 2 B = 1 KiB/KV head，Tail 的最终 O 为 2 × 6 × 256 × 2 B = 6 KiB。缓存命中会影响实际 GDDR7 流量。
 - 对应源码：`nvfp4_norm_pack.cu`、`nvfp4_attention_front.cu`、`nvfp4_bucket_xqa.cu`、`xqa_task_impl.cuh`。
 
@@ -84,5 +84,7 @@ Task = request 区间与 Bucket 区间的交集
    https://github.com/flashinfer-ai/flashinfer/tree/0179e5b312d6aa0c790e8e571b9037bb277f4dbd/csrc/xqa
 9. 排版与讲解层次参考：
    https://vllm-project.github.io/2025/09/05/anatomy-of-vllm.html
+10. NVIDIA RTX Blackwell GPU Architecture，图 5：
+    https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf
 
 正文与图形为本 Blog 编写；源码实现的来源、版权和许可证继续遵循各自仓库中的 NOTICE 与 LICENSE。

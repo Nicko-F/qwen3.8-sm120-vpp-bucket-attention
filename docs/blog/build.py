@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 BENCHMARKS = ROOT.parents[1] / "benchmarks"
 PAGES = {
-    "en": ("index.html", "content.en.html", "Qwen3.8 27B | From pipeline scheduling to CUDA kernel fusion",
+    "en": ("index.html", "content.en.html", "Accelerating Qwen3.8 27B Inference on SM120",
            "Interactive diagrams of folded VPP prefill, KV-length-aware decode and three CUDA kernel fusions on four RTX 5090 GPUs."),
-    "zh-CN": ("zh-CN.html", "content.html", "千问3.8 27B｜从流水线调度到 CUDA 算子融合",
+    "zh-CN": ("zh-CN.html", "content.html", "在 SM120 上加速千问3.8 27B 推理",
               "在四张 RTX 5090 上，通过交互图理解折返式 VPP、Decode 的 KV 分桶与三个 CUDA 融合算子。"),
 }
 
@@ -21,8 +21,8 @@ def json_script(name, data):
 
 
 def main():
-    css = (SRC / "styles.css").read_text(encoding="utf-8")
-    js = (SRC / "blog.js").read_text(encoding="utf-8")
+    css = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("styles.css", "sm.css"))
+    js = "\n".join((SRC / name).read_text(encoding="utf-8") for name in ("sm-diagram.js", "blog.js"))
     catalog = json.loads((SRC / "messages.json").read_text(encoding="utf-8"))
     data = {}
     for name in ("prefill", "decode", "http_fusion"):

@@ -50,6 +50,25 @@ async function stepThrough(page, selector) {
   }
 }
 
+function smLabelAlignment(svg) {
+  const misplaced = [];
+  for (const node of svg.querySelectorAll('[data-sm-node]')) {
+    const box = node.querySelector('rect').getBoundingClientRect();
+    const labels = [...node.querySelectorAll('text')].map(el => el.getBoundingClientRect());
+    const left = Math.min(...labels.map(r => r.left));
+    const right = Math.max(...labels.map(r => r.right));
+    const top = Math.min(...labels.map(r => r.top));
+    const bottom = Math.max(...labels.map(r => r.bottom));
+    const offsetX = (left + right - box.left - box.right) / 2;
+    const offsetY = (top + bottom - box.top - box.bottom) / 2;
+    if (Math.abs(offsetX) > 2 || Math.abs(offsetY) > 5 ||
+        left < box.left || right > box.right || top < box.top || bottom > box.bottom) {
+      misplaced.push([node.dataset.smNode, Math.round(offsetX), Math.round(offsetY)]);
+    }
+  }
+  return misplaced;
+}
+
 function readingGeometry() {
   const rect = element => element.getBoundingClientRect();
   const main = rect(document.querySelector('main'));
@@ -71,6 +90,13 @@ function readingGeometry() {
     const firstLine = range.getClientRects()[0];
     if (firstLine && Math.abs(firstLine.left - main.left) > 2) mismatches.push(element.textContent.slice(0, 30));
   }
+  for (const element of document.querySelectorAll('.equation math, .sm-architecture, .fusion-mode button, .hero-results strong')) {
+    const bounds = rect(element);
+    if (!bounds.width) continue;
+    if (bounds.left < main.left - 1 || bounds.right > main.right + 1) mismatches.push(element.textContent.slice(0, 35));
+  }
+  const hero = document.querySelector('.hero');
+  if (hero.scrollWidth > hero.clientWidth + 1) mismatches.push('hero content');
   const chart = document.querySelector('#load-chart');
   const rail = rect(document.querySelector('#toc'));
   return {
@@ -91,10 +117,10 @@ async function checkPage(browser, file, lang, otherPage) {
   try {
     await page.goto(url.href);
     assert.equal(await page.locator('html').getAttribute('lang'), lang);
-    assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Qwen3.8 27B' : '千问3.8 27B');
-    assert.equal(await page.locator('svg[role=img]').count(), 7);
-    assert.equal(await page.locator('.fusion-widget .memory-map').count(), 3);
-    assert.equal(await page.locator('.reference-list li').count(), 15);
+    assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Accelerating Qwen3.8 27B Inference on SM120' : '在 SM120 上加速千问3.8 27B 推理');
+    assert.equal(await page.locator('svg[role=img]').count(), 10);
+    assert.equal(await page.locator('.fusion-widget .sm-architecture svg').count(), 3);
+    assert.equal(await page.locator('.reference-list li').count(), 16);
     await page.evaluate(checkModels);
     await page.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
     for (const selector of ['#pipe-count', '#pipe-growth', '#load-preset', '#bucket-preset']) {
@@ -111,8 +137,9 @@ async function checkPage(browser, file, lang, otherPage) {
       for (const mode of ['before', 'after']) {
         await page.locator('#' + kind + '-widget button[data-mode=' + mode + ']').click();
         const widget = page.locator('#' + kind + '-widget');
-        assert.equal(await widget.locator('.memory-hop').count(), mode === 'before' ? 4 : 3);
-        assert.equal(await widget.locator('.memory-saving').count(), mode === 'before' ? 0 : 1);
+        const diagram = widget.locator('.sm-architecture svg');
+        assert.match(await diagram.textContent(), /GDDR7/);
+        assert.equal(await widget.locator('button[data-mode=' + mode + ']').getAttribute('aria-pressed'), 'true');
         await stepThrough(page, '#' + kind + '-widget .fusion-steps');
       }
     }
@@ -132,11 +159,15 @@ async function checkPage(browser, file, lang, otherPage) {
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const darkTrace = await traceColors();
-    for (const key of Object.keys(lightTrace)) assert.notEqual(lightTrace[key], darkTrace[key], key + ' should follow the theme');
+    for (const key of ['lane', 'label']) assert.notEqual(lightTrace[key], darkTrace[key], key + ' should follow the theme');
     await page.locator('#theme-toggle').click();
     assert.deepEqual(await traceColors(), lightTrace);
     for (const width of [320, 390, 650, 768, 1024, 1120, 1440, 1850, 1920]) {
       await page.setViewportSize({ width, height: 900 });
+      for (const svg of await page.locator('.sm-architecture svg').all()) {
+        assert.equal(await svg.locator('[data-sm-node]').count(), 4);
+        assert.deepEqual(await svg.evaluate(smLabelAlignment), [], file + ' SM labels at ' + width);
+      }
       const geometry = await page.evaluate(readingGeometry);
       const context = file + ' at ' + width + 'px';
       assert.deepEqual(geometry.mismatches, [], context + ' reading column');
@@ -160,6 +191,9 @@ async function checkPage(browser, file, lang, otherPage) {
     await page.locator('#language-switch').click();
     assert.equal(new URL(page.url()).pathname.split('/').pop(), otherPage);
     assert.equal(new URL(page.url()).hash, '#decode');
+    assert.equal(await page.locator('.equation').count(), 5);
+    assert.equal(await page.locator('.equation small').count(), 0);
+    assert.equal(await page.locator('.equation munderover').count(), 1);
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
     console.log(lang + ': ten diagrams, model checks, both themes, nine widths and language navigation passed');
