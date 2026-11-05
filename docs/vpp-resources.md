@@ -242,3 +242,35 @@ floor, bounded threads, finite timeout and owned-session cleanup. Record all
 bank samples, exact input lengths, allocator peaks, credit/prefetch counts,
 matched output publication counts and drained close receipts. Preserve the
 earlier observations and append these longer points separately.
+
+## Long-context measurements
+
+The 64K pair completed with the same library implementation as the earlier
+checks. Only the benchmark's optional input-length parameter changed
+(`d359b15`). These points retain C8192, four requests, one warm bank, three
+timed banks, ordered NUMA-local GPUs and 6 GiB KV/rank.
+
+| Input/request | Edge median (s) | Shared median (s) | Shared latency change | Edge range (s) | Shared range (s) |
+| --- | --- | --- | --- | --- | --- |
+| 65536 | 11.476845 | 11.490873 | +0.12% | 11.433025–11.496515 | 11.454258–11.508391 |
+
+The 64K distributions overlap. This small difference is consistent with a tie;
+the short-bank median gains do not extend to this longer bank. Communication
+payload remains 4480 versus 800 MiB on middle ranks. Their allocated peaks are
+22.167967 versus 18.574217 GiB, retaining the exact 3.59375 GiB saving.
+
+Native cache capacity was 1,218,502 tokens, with 18.59x capacity concurrency at
+65537 configured tokens and group sizes `(65537,65537,65537,2784)`. Both layouts
+had 502 cache blocks and no observed preemption messages. All source edges
+reported 132 direct publications, zero staged publications and sequence 132;
+all banks completed and transport ownership drained to zero.
+
+The shared 64K check accumulated 281 blocking credit waits (18,913.872 ms summed
+across ranks and setup/warm/timed phases), all on the source side; the control
+had none. Host enqueue backpressure therefore increased while bank latency
+stayed effectively unchanged. This is direct evidence that cumulative host
+credit-wait duration must not be counted as extra end-to-end delay. Shared
+source occupancy remained two and receive occupancy peaked at three.
+
+The 128K pair is the remaining follow-up; its samples will be appended to the
+same CSV without replacing the earlier measurements.
