@@ -1,13 +1,11 @@
 # Results
 
-The default public VPP implementation is now the
-[rank-shared resource path](vpp-resources.md#long-context-measurements). It has
-separate 8K/32K/64K/128K allocation, credit and bank-latency records. It retains
-the stage order and is separate from the historical performance tables below.
-
-These tables summarize completed research runs before extraction into this
-package. Packaging smoke results are recorded separately in
-[installation](installation.md). They do not replace performance measurements.
+The performance presentation reuses the completed benchmark datasets below.
+The public implementation uses rank-shared communication buffers while keeping
+the pipeline order. Allocation, credit and layout-validation records are in
+the [resource report](vpp-resources.md); package smoke records are in
+[installation](installation.md). The tables retain their original measurement
+settings and provenance.
 
 The shared experimental platform was four same-NUMA RTX 5090 GPUs, native mixed
 NVFP4 weights and NVFP4 KV, BF16 hidden/attention math and FP32 softmax/state.
