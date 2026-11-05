@@ -7,56 +7,40 @@
 <div id="toc-scrim" class="toc-scrim" hidden></div>
 <div class="article-shell">
 <main id="article" tabindex="-1">
-  <section class="hero" id="top">
-    <div class="hero-grid">
-      <div class="hero-copy">
-        <div class="eyebrow"><span class="dot"></span> 工程笔记 <span class="eyebrow-line"></span> 2026.11.05</div>
-        <h1><span class="hero-accent">千问3.8 27B</span> 在 SM120 上的推理优化</h1>
-        <p class="hero-subtitle">四卡预填充、长短请求混合解码，以及三处 CUDA 算子融合</p>
-        <div class="hero-meta"><span>NICKO</span><span class="meta-divider">/</span><span>4 × RTX 5090</span><span class="meta-divider">/</span><span>SM120 · NVFP4</span></div>
-        <a class="repo-card" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer"><span class="repo-symbol" aria-hidden="true">⌘</span><span><small>完整源码与实验数据</small><strong>Nicko-F / qwen3.8-sm120-vpp-bucket-attention</strong></span><span class="repo-arrow" aria-hidden="true">↗</span></a>
-      </div>
-      <div class="hero-results">
-        <a href="#prefill-results"><small>预填充 · 四个等长请求</small><strong class="metric-range">4.47<span class="dash">–</span>8.55<span class="unit">%</span></strong><span>相对 CPP 的耗时降幅</span></a>
-        <a href="#decode-results"><small>解码 · 一个长请求和 31 个短请求</small><strong class="metric-range">36.55<span class="unit">%</span></strong><span>相对原生解码的单步耗时降幅</span></a>
-        <a href="#fusion-results"><small>算子融合 · 完整解码步</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>在 KV 分桶基础上进一步缩短耗时</span></a>
-      </div>
-    </div>
-  </section>
-  <section class="prose intro" id="intro">
-    <p>用四张 RTX 5090 跑千问3.8 27B 时，我们先注意到了预填充流水线里的空档：一张卡还在算，下一张卡已经空下来等它的输出。解码时，一个 128K 请求混在一批 4K 请求里，大部分线程块很快就算完了，整步解码却还得等负责长请求的那几个。算子之间也有开销。前一个刚把中间结果写回全局内存，后一个就得把同一份数据读回来。</p>
-    <p>我们分别改了这三处。预填充用折返式虚拟流水线（VPP），让同一张卡交替处理新块和旧块。解码借鉴腾讯 HPC-Ops 的做法，按历史 KV 的长度给线程块（CTA）分配工作。最后把三处相邻操作分别融合，让上游算子直接写出下游需要的量化格式。<a class="ref" href="#ref-1">[1]</a></p>
-    <div class="chapter-map">
-      <a href="#prefill"><span class="map-num">01</span><span class="map-glyph" aria-hidden="true">▥ → ▥</span><strong>GPU 之间</strong><span>减少流水线空等</span></a>
-      <a href="#decode"><span class="map-num">02</span><span class="map-glyph" aria-hidden="true">▂ ▆ ▂ → ▄ ▄ ▄</span><strong>SM 之间</strong><span>摊开长请求的计算量</span></a>
-      <a href="#fusion"><span class="map-num">03</span><span class="map-glyph" aria-hidden="true">□ → □ → ▣</span><strong>算子之间</strong><span>少读写一次中间结果</span></a>
-    </div>
-    <p>四张卡连接到同一个 NUMA 节点。预填充用四级流水线并行（TP1/PP4），解码用四卡张量并行（TP4）。权重采用模型自带的 NVFP4/FP8 混合精度，KV 缓存用 NVFP4，隐藏状态和残差用 BF16。<a class="ref" href="#ref-8">[8]</a></p>
+  <header class="hero" id="top">
+    <div class="eyebrow"><span class="dot"></span> 推理优化笔记 <span class="eyebrow-line"></span> <time datetime="2026-11-05">2026.11.05</time></div>
+    <h1>四张 RTX 5090 <span class="title-phrase">跑<span class="hero-accent">千问3.8 27B</span>：</span><wbr><span class="title-phrase">从流水线调度</span><span class="title-phrase">到算子融合</span></h1>
+    <div class="hero-meta"><span>NICKO</span><span class="meta-divider">/</span><span>SM120 · vLLM · NVFP4</span></div>
+  </header>
+  <section class="prose intro" id="intro" aria-labelledby="abstract-heading">
+    <h2 id="abstract-heading">摘要</h2>
+    <p>我们在四张 RTX 5090 上运行千问3.8 27B，分别优化了预填充和解码。预填充采用折返流水线：把 64 层模型分成八段，每张卡交替执行其中两段。四个 32K 请求同时提交，直到全部生成首个 token，耗时由常规流水线的 4.30 秒降至 3.94 秒。</p>
+    <p>解码时，按各请求的 KV 缓存长度给线程块分配工作。一个 128K 请求与 31 个 4K 请求同时解码，完整模型的单步耗时从 28.63 毫秒降到 18.16 毫秒。在分桶基础上，我们融合了 MLP 输入、KV 写入和注意力输出端的相邻算子。用 1K 和 2K 上下文测试，批量取 1、8、16、32，完整 GPU 解码步的耗时进一步下降了 2.04%–7.18%。<a class="ref" href="#ref-1">[1]</a><a class="ref" href="#ref-8">[8]</a></p>
   </section>
 
   <section class="chapter" id="prefill">
-    <div class="chapter-heading"><div class="chapter-number">01</div><div><div class="eyebrow">预填充 / 流水线并行</div><h2>用四张卡跑折返流水线</h2></div></div>
+    <div class="chapter-heading"><div class="chapter-number">01</div><div><div class="eyebrow">预填充 / 流水线并行</div><h2>长上下文预填充的四卡流水线</h2></div></div>
     <div class="prose" id="prefill-cost">
-      <h3>块长相同，为什么后面的块算得更慢？</h3>
-      <p>分块预填充把长输入切成若干块，每次处理 <i>C</i> 个新 token。块长相同，线性投影和 MLP 每次的计算量也差不多。全注意力层的计算量却随历史长度增加。第一块只需看块内的 token，越往后，需要读取的历史 KV 越多。</p>
-      <p>第 <i>j</i> 块开始时，缓存里已有 <i>H<sub>j</sub></i> 个 token。由于使用因果掩码，块内第一个位置能看到 <i>H<sub>j</sub> + 1</i> 个位置，最后一个能看到 <i>H<sub>j</sub> + C</i> 个。把这 <i>C</i> 项相加，就是该块要算的 Q–K 配对数 <i>A<sub>j</sub></i>。</p>
+      <h3>相同块长下的注意力耗时</h3>
+      <p>实验使用 vLLM，四张卡位于同一个 NUMA 节点。权重沿用检查点的 NVFP4/FP8 配置，KV 缓存用 NVFP4，隐藏状态和残差用 BF16。</p><p>预填充采用四级流水线并行（TP1/PP4）。常规流水线（CPP）把 64 层模型均分给四张卡，每张负责连续的 16 层。以 32K 的输入为例，如果每块取 2K 个 token，一条请求会拆成 16 块。第 0 块在 GPU0 算完前 16 层后就送往 GPU1。此时 GPU0 可以开始算第 1 块，两张卡并行处理不同的输入块。</p>
+      <p>流水线的难点在于，各块的计算时间有差别。记块长为 <i>C</i>，第 <i>j</i> 块之前已有 <i>H<sub>j</sub></i> 个 token。做因果注意力时，块内第一个位置要跟 <i>H<sub>j</sub> + 1</i> 个键计算点积，最后一个位置则要跟 <i>H<sub>j</sub> + C</i> 个键计算点积。这一块总共要算多少对 Q 和 K，可以直接求和。</p>
       <div class="equation"><math display="block"><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>C</mi></munderover><mrow><mo>(</mo><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>i</mi><mo>)</mo></mrow></math><math display="block"><mo>=</mo><mi>C</mi><msub><mi>H</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mfrac><mrow><mi>C</mi><mrow><mo>(</mo><mi>C</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow></mrow><mrow><mn>2</mn></mrow></mfrac></math></div>
-      <p>看单个流水级。GDN、投影和 MLP 的耗时近似与新 token 数成正比，记为 <i>aC</i>。全注意力每处理一对 Q、K 的耗时记为 <i>b</i>，每块还有固定开销 <i>c</i>。三项相加，就是这个流水级处理第 <i>j</i> 块的时间。</p>
+      <p>用 <i>b</i> 表示每对 Q、K 对应的注意力计算耗时，GDN、线性投影和 MLP 的耗时则近似随本块新增的 token 数增长，合计为 <i>aC</i>。再计入每块的固定开销 <i>c</i>，单个流水级处理第 <i>j</i> 块的时间约为</p>
       <div class="equation"><math display="block"><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub><mo>=</mo><mi>a</mi><mi>C</mi><mo>+</mo><mi>b</mi><msub><mi>A</mi><mrow><mi>j</mi></mrow></msub><mo>+</mo><mi>c</mi></math></div>
-      <p>块长固定时，相邻两块相差 <i>C</i> 个历史 token，后一个块在同一级上多花约 <strong>bC²</strong> 的时间。常规流水线并行（CPP）还得等两件事：上一级送来本块的输入，本级算完上一块。两者取较晚的时刻，再加上本块耗时，就得到它在第 <i>s</i> 级的完成时刻。</p>
+      <p>每往后移一块，历史长度就多出 <i>C</i>，全注意力也多算 <i>C²</i> 对 Q、K。因此块长固定时，相邻两块在同一级上的耗时相差约 <strong>bC²</strong>。记第 <i>s</i> 级算完第 <i>j</i> 块的时刻为 <i>F<sub>s,j</sub></i>。本块可以开算的时刻，由上一级送达输入和本级算完上一块这两个时刻中较晚的一个决定。</p>
       <div class="equation"><math display="block"><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi></mrow></msub><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>−</mo><mn>1</mn><mo>,</mo><mi>j</mi></mrow></msub><mo>,</mo><msub><mi>F</mi><mrow><mi>s</mi><mo>,</mo><mi>j</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>)</mo></mrow><mo>+</mo><msub><mi>t</mi><mrow><mi>j</mi></mrow></msub></math></div>
-      <p>假设各级算得一样快，块的耗时逐块增加。<i>P</i> 级流水线处理完 <i>N</i> 块的总时间就是 <strong>Σt<sub>j</sub> + (P−1)t<sub>N</sub></strong>。第一项是第一级处理所有块的时间。用四张卡时，最后一块离开第一级以后，还要走完剩下的三级，因此总耗时里又多了三个 <i>t<sub>N</sub></i>。</p>
+      <p>如果各级算力相同，且每块耗时逐块递增，第一级算完全部 <i>N</i> 块要花 <i>Σt<sub>j</sub></i>。最后一块此时刚离开第一级，后面还有 <i>P−1</i> 级，每级都要花 <i>t<sub>N</sub></i>。整条流水线的总耗时为 <strong>Σt<sub>j</sub> + (P−1)t<sub>N</sub></strong>。四卡时，第二项就是三个末块的单级耗时。</p>
     </div>
     <div class="prose" id="prefill-fold">
-      <h3>每张卡各跑两段模型</h3>
-      <p>我们把 64 层模型切成 8 段，每段 8 层。前四段从 GPU0 排到 GPU3，后四段再从 GPU3 排回 GPU0。这样，每个块都按层号从小到大计算，到 GPU3 时连续算两段，再把结果往回传。<a class="ref" href="#ref-2">[2]</a><a class="ref" href="#ref-13">[13]</a></p>
+      <h3>把 64 层模型折成八段</h3>
+      <p>折返式虚拟流水线（VPP）把同样的 64 层切成八段，每段八层。一个块从 GPU0 开始，在去程经过 GPU1、GPU2，到 GPU3 算完第 24–31 层。它接着在 GPU3 算第 32–39 层，再按相反的顺序回到 GPU0，算完最后八层。<a class="ref" href="#ref-2">[2]</a><a class="ref" href="#ref-13">[13]</a></p>
       <div class="topology" aria-label="八个流水级在四张卡上的分布"><div class="topology-row"><span><b>GPU0</b>S0 · L0–7</span><i>→</i><span><b>GPU1</b>S1 · L8–15</span><i>→</i><span><b>GPU2</b>S2 · L16–23</span><i>→</i><span><b>GPU3</b>S3 · L24–31</span></div><div class="fold-arrow">本地折返 <span aria-hidden="true">↓</span></div><div class="topology-row returning"><span><b>GPU0</b>S7 · L56–63</span><i>←</i><span><b>GPU1</b>S6 · L48–55</span><i>←</i><span><b>GPU2</b>S5 · L40–47</span><i>←</i><span><b>GPU3</b>S4 · L32–39</span></div></div>
-      <p>以 GPU0 为例，它既负责开头的 8 层（S0），也负责末尾的 8 层（S7）。流水线填满后，它的计算顺序是 <code>S7(C0) → S0(C7) → S7(C1) → S0(C8)</code>：刚算完第 0 块的最后 8 层，就接着算第 7 块的头 8 层。旧块的收尾工作因此能穿插在新块的计算之间。</p>
-      <p>每张卡只用一条计算流，两段模型轮流算，一次调度 8 层。启动时，GPU0 到 GPU3 分别先算 <strong>7、5、3、1</strong> 个去程块，随后交替处理回程和去程。四张卡可以同时算不同的块。<a class="ref" href="#ref-9">[9]</a></p>
+      <p>这种排法给了 GPU0 两种可以做的工作：给刚进入流水线的块算前八层，或给从 GPU1 返回的块算最后八层。用 C 表示块、S 表示流水级，稳态下 GPU0 的一段执行顺序是 <code>S7(C0) → S0(C7) → S7(C1) → S0(C8)</code>。第 0 块的回程和第 7 块的去程在同一条计算流上交替执行。</p>
+      <p>要形成这样的交错，四张卡启动时处理的去程块数不同：GPU0 先处理七块，GPU1 五块，GPU2 三块，GPU3 一块。GPU3 可以最早折返，GPU0 要等第一个块经过其余各级再回来。图中可以单独选中 C0，沿四行时间线看它何时换卡、何时折返。<a class="ref" href="#ref-9">[9]</a></p>
     </div>
 
     <figure class="interactive" id="pipeline-figure" data-widget="pipeline">
-      <div class="figure-header"><div><div class="figure-kicker">图 01–02 / 流水线排程</div><h4>同样一批输入，CPP 和 VPP 怎样排程？</h4></div></div>
+      <div class="figure-header"><div><div class="figure-kicker">图 01–02 / 流水线排程</div><h4>同一批输入在 CPP 和 VPP 上的执行顺序</h4></div></div>
       <div class="figure-controls"><label>分块数 <select id="pipe-count"><option value="8">8</option><option value="16" selected>16</option><option value="24">24</option></select></label><label>每块耗时 <select id="pipe-growth"><option value="0">等耗时</option><option value="0.12" selected>逐步增长</option><option value="0.24">增长较快</option></select></label><label>高亮分块 <select id="pipe-highlight"><option value="-1">全部</option></select></label></div>
       <div class="stepper" id="pipe-steps" role="group" aria-label="选择流水阶段"></div>
       <div class="trace-pair"><div class="trace-panel"><div class="trace-title"><span><b>CPP</b> 4 个物理流水级</span><span id="cpp-runtime"></span></div><div class="svg-scroll" id="cpp-timeline"></div></div><div class="trace-panel"><div class="trace-title"><span><b>VPP</b> 4 张卡、8 个虚拟流水级</span><span id="vpp-runtime"></span></div><div class="svg-scroll" id="vpp-timeline"></div></div></div>
@@ -67,16 +51,16 @@
     </figure>
 
     <div class="prose" id="prefill-results">
-      <h3>四个长请求跑下来能快多少？</h3>
-      <p>我们同时提交四个等长请求，从开始计时到四个请求都生成首个 token。每种输入长度分别取 CPP 和 VPP 各自最快的配置，报告三次计时的中位数。每个请求输入 32K 时，四个请求的总耗时从 <strong>4.304 秒降到 3.936 秒</strong>。把输入长度从 8K 扫到 128K，VPP 缩短了 <strong>4.47%–8.55%</strong> 的耗时。<a class="ref" href="#ref-8">[8]</a></p>
+      <h3>8K 至 128K 输入的预填充耗时</h3>
+      <p>四个等长请求一起提交，以最后一个请求生成首个 token 为计时终点。CPP 和 VPP 分别取各自在该长度下最快的配置，每组计时三次，取中位数。输入为 8K 时，四个请求的耗时从 832.4 毫秒降到 795.2 毫秒；输入为 32K 时，从 <strong>4.304 秒降到 3.936 秒</strong>。在测试的四种长度中，32K 的相对降幅最大，为 8.55%。<a class="ref" href="#ref-8">[8]</a></p>
     </div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 预填充</div><h4>四个请求全部生成首个 token 的用时</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="预填充图表单位"><button data-value="relative" aria-pressed="true">相对耗时</button><button data-value="absolute" aria-pressed="false">绝对耗时</button></div></div><div id="prefill-chart" class="benchmark-bars"></div></figure>
-    <div class="prose"><p>如果只有一个 8K 请求，CPP 用 304.6 毫秒，VPP 用 311.0 毫秒，这时 CPP 快了 6.4 毫秒。四个长请求能拆出更多块，GPU 才有足够的去程和回程工作可以交替执行。</p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 预填充</div><h4>四个等长请求均生成首个 token 所需的时间</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="预填充图表单位"><button data-value="relative" aria-pressed="true">相对耗时</button><button data-value="absolute" aria-pressed="false">绝对耗时</button></div></div><div id="prefill-chart" class="benchmark-bars"></div></figure>
+    <div class="prose"><p>一个 8K 请求的结果则是 CPP 304.6 毫秒，VPP 311.0 毫秒。块数少时，可供交错的去程和回程计算也少。上图的 4.47%–8.55% 对应四个等长请求同时执行。</p></div>
 
-    <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>单卡上的计算与通信怎么重叠？</strong><small>共享缓冲区、CUDA 流和分段传输</small></span><span class="detail-badge">实现细节</span></summary><div class="details-body">
-      <div class="prose"><h3>两个虚拟阶段如何共用一张 GPU</h3><p>在 GPU1 上，S1 和 S6 共用一条计算流。同一块必须先收到输入，算出相应的输出后才能发走。换成三个不同的块，这三件事就能重叠：计算流算当前块，接收流预取下一块，发送流搬走上一块的输出。图中实线是数据流向，虚线是主机代理线程发出的控制信号。<a class="ref" href="#ref-9">[9]</a></p></div>
+    <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>实现：单卡上的计算与跨卡传输</strong><small>共享缓冲区、CUDA 流和分段传输</small></span><span class="detail-badge">实现细节</span></summary><div class="details-body">
+      <div class="prose"><h3>GPU1 的三条 CUDA 流</h3><p>以 GPU1 为例，S1 和 S6 共用一条计算流，另外两条流分别负责收和发。同一个块的计算要等输入到齐，发送要等对应的输出算好。三个不同的块却可以同时占用这三条流：接收后续块的输入、计算当前块、发送先前块的输出。实线标出数据流向，虚线标出主机代理线程控制的操作。<a class="ref" href="#ref-9">[9]</a></p></div>
       <figure class="data-figure nested" id="vpp-topology">
-        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">图 03 / GPU1</div><h4>GPU1 上的接收、计算和发送可以并行</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">同一时刻的三条流</button></div></div>
+        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">图 03 / GPU1</div><h4>GPU1 的接收流、计算流和发送流</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">同一时刻的三条流</button></div></div>
         <div id="rank-topology" hidden></div>
         <div id="rank-diagram" class="rank-snapshot" role="group" aria-label="同一时刻，三条 CUDA 流各处理一个块">
           <div class="rank-time-label"><span>GPU1 的三条流</span><span>时刻 t ↓</span></div>
@@ -109,9 +93,9 @@
           <div class="rank-control"><span><strong>主机代理线程</strong> 提交拷贝并交换 READY / ACK</span><span><strong>GPU 拷贝引擎</strong> 执行 H2D 和 D2H 拷贝</span></div>
         </div>
       </figure>
-      <div class="prose"><p>去程和回程共用三个接收槽、两个输出槽。每块有 8K 个 token 时，一份隐藏状态加残差占 160&nbsp;MiB，五个槽共占 800&nbsp;MiB。流水线允许最多七个批次同时在途（<code>W=7</code>），但每个槽只需用到最后一次读取结束：发送流读完就能归还输出槽，本级计算读完就能归还接收槽。去程和回程分别记录序号和就绪事件，通过这些信息区分共用缓冲槽里的数据。</p><p>跨卡传输要经过主机内存。每条通信链路在主机上注册一块环形缓冲区，分成 8 段，每段 16 MiB。一份 160 MiB 的输出要分 10 次搬。接收端一读完最早的一段，发送端就能复用那块空间。</p></div>
-      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">图 04 / 分段 DMA</div><h4>接收端如何提前提交下一次拷贝</h4></div></div><div class="stepper" id="dma-steps" role="group" aria-label="选择 DMA 阶段"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>橙色表示 GPU 到主机，青色表示主机到 GPU。虚线连接完成事件和等待它的下一次搬运。</figcaption></figure>
-      <div class="prose"><p>每张卡有一个主机代理线程。上游算出一段数据后，代理线程把这段数据的 D2H 拷贝和完成事件排入发送流，再通过共享内存发布 READY。下游收到通知，就可以提前把“等待该事件”和 H2D 拷贝排入接收流。这样，上游一拷完，下游的拷贝引擎就能接着搬。</p><p>每个事件只管一段依赖。H2D 完成后，主机上的这一段缓冲就能复用。整块输入到齐后，计算流才能开始算。等这个流水级用完输入，接收槽就能留给下一块。</p>
+      <div class="prose"><p>去程和回程复用同一组缓冲区。块长为 8K 时，一份隐藏状态和残差共 160&nbsp;MiB。GPU1 的三个接收槽和两个输出槽一共占 800&nbsp;MiB。虽然流水线最多允许七个批次同时在途（<code>W=7</code>），输出槽在 D2H 拷贝结束后就能再写，接收槽在本地计算用完输入后就能再收。两个方向用各自的序号和就绪事件区分批次。</p><p>本机跨卡传输经由主机内存。每条链路有一块已注册的环形缓冲区，分为八段，每段 16 MiB。传完 160 MiB 共需十段。等接收端取走第一段，发送端就可以用同一位置存第九段。</p></div>
+      <figure class="interactive nested" id="dma-figure"><div class="figure-header"><div><div class="figure-kicker">图 04 / 分段 DMA</div><h4>经主机内存中转的分段拷贝</h4></div></div><div class="stepper" id="dma-steps" role="group" aria-label="选择 DMA 阶段"></div><div class="trace-panel"><div id="dma-timeline" class="svg-scroll"></div></div><div id="dma-credits" class="credit-row"></div><div class="figure-explanation" id="dma-explanation" aria-live="polite"></div><figcaption>橙色表示 GPU 到主机，青色表示主机到 GPU。虚线连接完成事件和等待它的下一次搬运。</figcaption></figure>
+      <div class="prose"><p>每张卡对应一个主机代理线程。上游线程把 D2H 拷贝和完成事件加入发送流，然后发出 READY。下游线程收到 READY，就把等待该事件和 H2D 拷贝一起加入接收流。上游传完这个分段时，下游的拷贝已经排好，可以立即开始。</p><p>这些事件决定缓冲区何时可用。H2D 传完一段，主机缓冲区就可以回收这一段。整块接收完毕，计算流才读取输入。对应的流水级算完后，接收槽才可用于下一个块。</p>
       <div class="code-block"><div class="code-heading">执行思路 / 伪代码</div><pre><code>for (batch, stage) in local_stage_order:
     prefetch_ready_inputs()           # 每个方向最多提前取一个尚未使用的输入
     input = receive_for(batch, stage)
@@ -123,35 +107,35 @@
     record_consumer_done(input)
 
 # 主机代理线程提交分段拷贝，并在完成事件触发后释放对应的缓冲槽。</code></pre></div>
-      <p>在 vLLM 中，executor 提交新批次和需要继续执行的批次，worker 从本地队列选流水级，runner 绑定对应的模型层及其输入输出。常规执行时可以直接往输出槽写。如果 CUDA Graph 有自己的输出缓冲区，就先把结果复制到槽里，再通知下游。模型计算和采样都由 vLLM 执行。</p></div>
+      <p>在 vLLM 内部，executor 提交批次，worker 根据本地队列决定接下来执行哪个流水级，runner 选择对应层并绑定输入输出。逐次执行时，模型可以把结果直接写入输出槽。使用独立输出缓冲区的 CUDA Graph 则在重放结束后把结果复制到槽中，随后通知下游。</p></div>
       <details class="experiment" id="prefill-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、完整结果与模型推导</strong><small>块长选择、单请求与四请求对比、耗时模型</small></span></summary><div class="experiment-body prose">
         <div class="config-grid"><div><small>设备 / 并行</small><strong>4 × RTX 5090 · TP1/PP4</strong></div><div><small>数据类型</small><strong>NVFP4 KV 缓存 · BF16 隐藏状态</strong></div><div><small>工作负载</small><strong>4 个请求 · 每个 8K–128K</strong></div><div><small>统计口径</small><strong>每组计时三次，取中位数</strong></div></div>
-        <p>CPP 测了 2K、4K、8K、16K 四种块长，VPP 测了 2K、4K、8K，另测了 DCPP 作为参考。连同关闭 CUDA Graph 和启用分段图两种方式，共 20 种配置、160 组输入与配置组合，每组计时三次。每张卡给 KV 缓存预留 8 GiB，关闭 MTP 和前缀缓存，采样温度为 0.7，top-p 为 0.9。</p>
+        <p>CPP 的块长取 2K、4K、8K、16K，VPP 取 2K、4K、8K，另设 DCPP 参考组。实验覆盖关闭 CUDA Graph 和分段捕获两种方式，共 20 种配置、160 组输入与配置组合，计时 480 次。每个 rank 的 KV 缓存预算为 8 GiB。关闭 MTP 和前缀缓存，采样温度为 0.7，top-p 为 0.9。</p>
         <div class="table-wrap"><table><thead><tr><th>输入 / 请求</th><th>CPP ms</th><th>VPP ms</th><th>VPP 配置</th><th>延迟降低</th></tr></thead><tbody><tr><td>8K</td><td>832.413</td><td>795.197</td><td>2K 块 · 分段图</td><td>4.47%</td></tr><tr><td>32K</td><td>4,304.359</td><td>3,936.227</td><td>4K 块 · 分段图</td><td>8.55%</td></tr><tr><td>64K</td><td>11,647.508</td><td>10,834.357</td><td>4K 块 · 分段图</td><td>6.98%</td></tr><tr><td>128K</td><td>35,241.058</td><td>33,410.873</td><td>8K 块 · 关闭图</td><td>5.19%</td></tr></tbody></table></div>
-        <h4>流水线为什么多花 (P−1)t<sub>N</sub>？</h4><p>当各级等速、块耗时 <i>t<sub>j</sub></i> 单调不减时，由上面的递推式可得 <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>。对第 <i>s</i> 级来说，前一块算完后，还要等上游 <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i> 才能收到下一块。固定块长时，这段等待近似恒定。随着上下文增长，最后一块的耗时 <i>t<sub>N</sub></i> 越来越长，整条流水线的附加耗时 <i>(P−1)t<sub>N</sub></i> 也随之增加。</p>
+        <h4>相邻块的等待时间与整条流水线的总耗时</h4><p>当各流水级等速且 <i>t<sub>j</sub></i> 单调不减时，递推式的解为 <i>F<sub>s,j</sub> = Σ<sub>k≤j</sub>t<sub>k</sub> + (s−1)t<sub>j</sub></i>。在第 <i>s</i> 级，相邻两块之间的等待为 <i>(s−1)(t<sub>j</sub>−t<sub>j−1</sub>)</i>。对固定块长，这一项近似恒定。整条流水线的附加耗时却与最后一块的耗时成正比，会随上下文增长。两者描述的时间尺度不同。</p>
         <p class="source-line">结果：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/prefill.csv" target="_blank" rel="noopener">prefill.csv ↗</a>　实现：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/src/qwen_infra/vpp/layout.py" target="_blank" rel="noopener">layout.py ↗</a>　通信：<a href="#ref-9">VPP communication [9]</a></p>
       </div></details>
     </div></details>
   </section>
 
   <section class="chapter" id="decode">
-    <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">解码 / KV 工作划分</div><h2>解码：按 KV 长度分配工作</h2></div></div>
-    <div class="prose" id="decode-load"><h3>同样生成一个 token，工作量却可能相差几十倍</h3><p>解码时，每个请求只生成一个新 token，Q 的长度很短，注意力计算的大部分工作都花在读取历史 KV、计算 QK、softmax 和 PV 上。对于同一层、同样大小的注意力头，KV 越长，要读的数据和要算的点积就越多。</p><p>本项目使用 Qwen3.8 NVFP4 模型和 TP4。每张卡上的全注意力层分片包含 6 个 Q 头、1 个 KV 头，头维度为 256。原生 FlashInfer XQA 用 Split-KV 把一个请求拆成几份并行计算。如果每个请求分到的份数相同，128K 请求的每一份就比 4K 请求重得多。<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>举个例子。32 个请求分给 170 个 CTA，原生 XQA 给每个请求分五片。负责 128K 请求的最忙 CTA 要处理 103 个 KV 块（tile），每块含 256 个 token；负责 4K 请求的最忙 CTA 只需处理四块。多数 CTA 很快完成，整次注意力计算却还要等少数几个长分片结束。</p></div>
-    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">图 05 / CTA 工作量</div><h4>长请求让少数 CTA 忙到最后</h4></div></div><div class="figure-controls"><label>请求分布 <select id="load-preset"><option value="skew32">128K + 31 × 4K</option><option value="skew9">128K + 8 × 4K</option><option value="uniform">32 × 8K</option></select></label></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>每根柱子代表一个 CTA，纵轴为 KV 块数，每块含 256 个 token。两幅图使用相同刻度。</figcaption></figure>
-    <div class="prose" id="split-strategies"><h3>从按请求拆分，到跨请求均分</h3><p>FlashAttention-3 的变长 Split-KV 路径已经能按请求长度调整分片数：先统计整个批次的 Q/KV 工作量，估算每个分片应承担多少工作，再为长请求分配更多分片、为短请求分配更少分片。每个分片处理一个请求内的连续 KV 区间，写出局部输出和 LogSumExp，最后由合并内核汇总结果。<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4 的 SM100/SM103 Split-KV 路径也支持逐请求分片配置，同时考虑查询与注意力头的并行度、KV 长度和硬件容量。LPT 等调度策略则进一步调整执行顺序，让较重的任务先运行。这些方法都在减少任务轻重不均造成的空闲，让一个批次的注意力计算充分利用 GPU。<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>腾讯 HPC-Ops 将分配范围扩展到整个批次：先把所有请求的 KV 工作首尾相接，再按 CTA 预算切分。这样，一个 CTA 处理完前一个请求的末尾后，还可以继续处理下一个请求的开头。本项目沿用了这种划分方式：<strong>用 HPC-Ops 的全局 KV 分桶方法分配工作，在 SM120 上用 FlashInfer XQA 读取 NVFP4 KV 缓存并计算注意力。</strong><a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
-      <div class="strategy-cards"><div><small>自适应 SPLIT-KV</small><strong>每个请求该拆成几片</strong><p>根据长度确定分片数，每片只处理一个请求的 KV。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>全局 KV 分桶</small><strong>每个 CTA 该分到多少工作</strong><p>跨请求凑出工作量相近的桶，一个 CTA 依次处理桶内的多个子任务。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
-      <h3>KV 块、子任务、任务桶如何对应</h3><p>分配从 <strong>KV 块（tile）</strong>开始，每块最多包含 256 个 token。第 <i>i</i> 个请求的长度除以 256，再向上取整，就是块数 <i>n<sub>i</sub></i>。同一请求内的一段连续块组成一个<strong>子任务（Task）</strong>，分给同一 CTA 的所有子任务组成一个<strong>任务桶（Bucket）</strong>。把全批次的块数相加，除以 CTA 数量并向上取整，就得到每桶的目标块数，最少取两块。</p>
+    <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">解码 / 全注意力层</div><h2>混合长度请求的 KV 分桶</h2></div></div>
+    <div class="prose" id="decode-load"><h3>一个 128K 请求与 31 个 4K 请求</h3><p>同一批里的 32 个请求，每一步都各生成一个 token。假设其中一个已有 128K 上下文，其余 31 个各有 4K。此时每个请求只有一个新位置需要查询，但长请求要读取的 KV 缓存约为短请求的 32 倍。</p><p>本次解码采用四卡张量并行（TP4）。每张卡在全注意力层上负责 6 个 Q 头和 1 个 KV 头，头维度为 256。原生 FlashInfer XQA 使用 Split-KV，把一个请求的历史 KV 分给多个线程块（CTA）并行计算。对于上面这批输入，原生路径给每个请求分五片。<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>图 5 用每个 CTA 分到的 KV 块数表示工作量，每块最多 256 个 token。长请求占 511 块，分五片后，每片最多 103 块；短请求各占 16 块，分五片后，每片最多 4 块。一次注意力计算要等所有分片算完，因此原生路径中，这一批的结束时间取决于长请求的分片何时算完。</p></div>
+    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">图 05 / 原生 XQA 与 KV 分桶</div><h4>各 CTA 分到的 KV 块数</h4></div></div><div class="figure-controls"><label>请求分布 <select id="load-preset"><option value="skew32">128K + 31 × 4K</option><option value="skew9">128K + 8 × 4K</option><option value="uniform">32 × 8K</option></select></label></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>每根柱子对应一个 CTA，高度为它分到的 KV 块数。每块最多 256 个 token，上下两图的纵轴刻度相同。</figcaption></figure>
+    <div class="prose" id="split-strategies"><h3>按请求分片与跨请求分桶</h3><p>要减小分片间的差距，FlashAttention-3 的做法是先估算全批次的 Q/KV 工作量，再分别确定每个请求的分片数。长请求可以多分几片，短请求少分几片。每片仍属于同一个请求，写出局部输出和 log-sum-exp，再由合并算子得到完整输出。<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4 在 SM100/SM103 上也支持按请求确定分片数。调度时还会考虑查询数、头数和可用计算资源。对耗时不同的任务，LPT 策略会优先安排预计用时较长的任务。<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>我们采用腾讯 HPC-Ops 的全局分桶算法。先把整批请求的 KV 块连续编号，再按块数分给各个 CTA。一个 CTA 分到的区间可以跨越请求边界。我们在 SM120 上复用了 FlashInfer XQA 的注意力计算和 NVFP4 缓存读取代码，修改了它领取任务的方式。<a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
+      <div class="strategy-cards"><div><small>自适应 SPLIT-KV</small><strong>按请求确定分片数</strong><p>一个分片只包含一个请求的 KV。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>全局 KV 分桶</small><strong>按 CTA 确定块数</strong><p>一个桶可以包含多个请求的 KV，各请求的结果单独计算。</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
+      <h3>从 KV 长度计算分桶大小</h3><p>设请求 <i>i</i> 占 <i>n<sub>i</sub></i> 个 KV 块，由缓存长度除以 256 并向上取整得到。把全批次的块数除以可用 CTA 数，再向上取整，就是每桶的目标块数 <i>B</i>。实现中每桶至少按两块分配。</p>
       <div class="equation"><math display="block"><mi>B</mi><mo>=</mo><mi mathvariant="normal">max</mi><mrow><mo>(</mo><mn>2</mn><mo>,</mo><mo>⌈</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>n</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><msub><mi>N</mi><mtext>CTA</mtext></msub></mrow></mfrac><mo>⌉</mo><mo>)</mo></mrow></math></div>
-      <p>前面的 B32 批次共有 <i>511 + 31 × 16 = 1007</i> 个 KV 块，算出每桶的目标大小为 6 块。按请求顺序填桶，跨过请求边界时，就在当前桶里新建一个子任务。GPU 上的 Assign 内核每个解码步生成一次分配表，形状兼容的全注意力层复用同一张表。<a class="ref" href="#ref-7">[7]</a></p>
+      <p>在图 5 的混合批次中，<strong>511 + 31 × 16 = 1007</strong> 块 KV 分给 170 个 CTA，每桶最多六块。假设一个桶前两块属于请求 A，后四块属于请求 B，它就包含两个子任务。执行该桶的 CTA 分别为 A 和 B 计算局部结果。每一步解码，Assign 内核只建一次分配表，形状相同的全注意力层共用它。<a class="ref" href="#ref-7">[7]</a></p>
     </div>
-    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">图 06 / 从分配到计算</div><h4>一个批次如何分给各个 CTA</h4></div></div><div class="figure-controls"><label>示例 <select id="bucket-preset"><option value="teaching">4 个请求 / 8 个 CTA · 块数 9、3、2、1</option><option value="real">128K + 31 × 4K</option></select></label><label>跟踪 CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="选择分桶阶段"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>查看当前任务表</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>颜色区分请求；同一个桶里出现不同颜色，表示它包含多个请求的子任务。</figcaption></figure>
-    <div class="prose"><p>Compute 阶段启动固定规模的 CTA 网格。每个 CTA 读取自己的任务桶，依次执行其中的子任务。一个子任务连续处理多个 KV 块，用 online softmax 累积计算，结束时写出一份局部结果（Partial）。如果下一个子任务属于另一个请求，CTA 就重新初始化计算状态，再继续执行。</p><p>分桶保留了 XQA 的 KV 加载、QK/PV 和 softmax 计算，只重新安排这些计算由谁来做：原生路径给每个请求相同的分片数，全局分桶则尽量让每个 CTA 承担相近的工作量。</p></div>
-    <div class="prose" id="decode-results"><h3>长短请求混在一起，收益最明显</h3><p>在 TP4 模型测试中，每个请求生成 256 个 token，各组统一用第 17 至 240 个输出 token 统计完整模型的单步耗时。9 个请求的长短混合批次（B9）从 <strong>20.04 ms 降到 14.37 ms</strong>；32 个请求的混合批次（B32）从 <strong>28.63 ms 降到 18.16 ms</strong>，延迟分别降低 28.28% 和 36.55%。32 个等长请求则都在 17.9 ms 左右。长短请求带来的工作量差距越大，分桶越能缩短等待长分片的时间。<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 完整模型解码</div><h4>长请求分给更多 CTA 后，单步耗时怎么变？</h4></div><span class="figure-tag">毫秒 / 步 ↓</span></div><div id="decode-chart" class="benchmark-bars"></div></figure>
-    <div class="prose"><p>在混合长度请求持续到达的 HTTP 测试中，Bucket 的输出吞吐也比原生路径高约 <strong>10%–11%</strong>。运行时保留 Native、Aligned 和 Persistent 三种执行路径，根据请求长度分布选择：工作量均匀时走开销较小的路径，长短差异明显时使用全局分桶。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">图 06 / 从分配到计算</div><h4>请求、KV 块与线程块的对应关系</h4></div></div><div class="figure-controls"><label>示例 <select id="bucket-preset"><option value="teaching">4 个请求 / 8 个 CTA · 块数 9、3、2、1</option><option value="real">128K + 31 × 4K</option></select></label><label>跟踪 CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="选择分桶阶段"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>查看当前任务表</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>颜色区分请求；同一个桶里出现不同颜色，表示它包含多个请求的子任务。</figcaption></figure>
+    <div class="prose"><p>计算内核启动后，每个 CTA 按表依次执行桶内的子任务。对同一请求的一段连续 KV，用在线 softmax 逐块更新统计量，遍历完再写出一份局部结果。遇到下一个子任务时重新初始化累加状态，这样同一 CTA 可以先后计算两个请求的注意力。</p><p>原生 XQA 和分桶 XQA 都要读取同一批 KV，计算相同的 QK 和 PV。图 5 展示的是重新分配之后各个 CTA 的工作量；实际耗时还包含写出和合并局部结果的开销。</p></div>
+    <div class="prose" id="decode-results"><h3>等长与混合长度请求的单步解码耗时</h3><p>我们让每个请求生成 256 个 token，用第 17 至 240 个输出 token 统计完整模型的单步耗时。同为 32 个请求，输入全是 8K 时，原生和分桶方案都是约 17.9 毫秒。把其中的输入换成一个 128K 加 31 个 4K，原生需 <strong>28.63 毫秒</strong>，分桶需 <strong>18.16 毫秒</strong>，耗时下降 36.55%。另一个较小的批次由一个 128K 加八个 4K 组成，对应耗时为 20.04 和 14.37 毫秒，下降 28.28%。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 完整模型解码</div><h4>原生 XQA 与分桶 XQA 的完整模型单步耗时</h4></div><span class="figure-tag">毫秒 / 步 ↓</span></div><div id="decode-chart" class="benchmark-bars"></div></figure>
+    <div class="prose"><p>实际服务会把不同时间到达的请求合并执行，每一步的请求数和上下文长度都可能变化。运行时根据这一批的长度分布选择 Native、Aligned 或 Persistent 路径，负载明显不均时才使用全局分桶。在长短请求持续到达的 HTTP 测试中，这样做使输出吞吐比原生实现提高约 10%–11%。<a class="ref" href="#ref-8">[8]</a></p></div>
 
     <details class="deep-dive" id="decode-implementation"><summary><span class="detail-icon">＋</span><span><strong>实现细节：任务表、逐桶计算与最终归约</strong><small>任务表跨层复用 · 每个子任务一份局部结果 · Last-CTA Merge</small></span><span class="detail-badge">实现</span></summary><div class="details-body">
-      <div class="prose"><h3>Assign 建表，Compute 按表执行</h3><p>Assign 是一个轻量 GPU 内核。它读取各请求的长度，计算 KV 块数的前缀和，再构建三张表：<code>tasks</code> 记录每个子任务处理的请求及 KV 区间，<code>buckets</code> 记录每个 CTA 负责哪些子任务，<code>requests</code> 记录各请求的局部结果从哪里开始、共有多少份。一个桶跨过请求边界时会拆出多个子任务，因此任务表按 <code>NCTA + batch − 1</code> 预留容量。</p>
+      <div class="prose"><h3>任务表的生成与跨层复用</h3><p>Assign 先算各请求 KV 块数的前缀和，由此确定每个桶与哪些请求相交。<code>tasks</code> 记录每个交集对应的请求及 KV 区间，<code>buckets</code> 记录每个 CTA 应执行的子任务，<code>requests</code> 则按请求索引局部结果。任务表最多需要 <code>NCTA + batch − 1</code> 项：每个桶先占一项，每遇到一条桶内的请求边界再增加一项。</p>
       <div class="code-block"><div class="code-heading">任务分配与执行 / 伪代码</div><pre><code>tiles[i] = ceil(kv_length[i] / 256)
 budget = max(2, ceil(sum(tiles) / num_ctas))
 
@@ -165,36 +149,36 @@ for request in batch:
 for task in buckets[blockIdx.x]:
     partial = xqa_attention(task)     # 一个子任务连续处理多个 KV 块
     publish_and_maybe_merge(partial)</code></pre></div>
-      <p>任务表的地址在 CUDA Graph 捕获前就已固定。每次模型前向计算时，Assign 只更新表内内容；各注意力层绑定自己的 Q、KV 和输出张量，再按同一张表执行。因此，请求长度变化时，只需更新这份小表，就能调整各 CTA 的工作量。</p>
-      <h3>每个子任务写出局部结果，最后完成的 CTA 负责合并</h3><p>每个子任务只处理请求的一段 KV。对每个 Q 头，它写出归一化后的局部输出 <i>O<sub>i</sub></i>、局部最大值 <i>m<sub>i</sub></i> 和指数和 <i>l<sub>i</sub></i>。这些数据按子任务编号保存在全局内存的临时缓冲区中。本项目的 TP4 配置下，每份局部输出的有效尺寸为 <i>6 × 256</i>。</p><p>子任务写完局部结果后，更新所属请求的完成计数器。该请求最后一个子任务所在的 CTA 负责读取全部局部结果、完成归约，并直接写出最终输出。这就是 Last-CTA Merge：复用 XQA 的内核内归约逻辑，在同一次 Compute 内核调用里完成分片计算与合并。<a class="ref" href="#ref-7">[7]</a></p></div>
-      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">图 07 / LAST-CTA MERGE</div><h4>最后完成的 CTA 合并这个请求的结果</h4></div></div><div class="stepper" id="merge-steps" role="group" aria-label="选择子任务完成阶段"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div></figure>
-      <div class="prose"><p>合并时，先取所有局部最大值中的最大值 <i>m</i>，以它为共同基准计算各分片的 softmax 权重，再对局部输出加权平均。</p><div class="equation"><math display="block"><mi>m</mi><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>,</mo></math><math display="block"><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo><msub><mi>l</mi><mrow><mi>i</mi></mrow></msub><msup><mi>e</mi><mrow><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>−</mo><mi>m</mi></mrow></msup><mo>,</mo></math><math display="block"><mi>O</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><msub><mi>O</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub></mrow></mfrac></math></div><p>如果一个子任务就能覆盖整个请求，就直接写出最终输出。有多个子任务时，写入局部结果后，通过带获取/释放语义的原子计数确定最后完成者；归约完成后，再复位本轮计数器。分片数、临时缓冲区位置和完成状态都按请求记录。</p></div>
+      <p>三张表在捕获 CUDA Graph 前分配好存储。每次前向计算只更新表内的区间和计数，地址固定。各层读取同一套任务划分，同时使用本层的 Q、KV 缓存和输出缓冲区。</p>
+      <h3>同一请求的分片如何归约</h3><p>对一段 KV，每个 Q 头保留三项局部结果：归一化后的输出 <i>O<sub>i</sub></i>、最高注意力分数 <i>m<sub>i</sub></i>、以这个最高分为基准的指数和 <i>l<sub>i</sub></i>。它们按子任务编号写入临时缓冲区。在这组 TP4 配置中，单个子任务的局部输出有 6 × 256 个元素。</p><p>每个子任务写完后更新所属请求的计数器。让最后完成的 CTA 读取该请求的全部局部结果并写出最终值，这就是 XQA 的 Last-CTA Merge。分片计算与最终归约都在同一次内核调用中完成。<a class="ref" href="#ref-7">[7]</a></p></div>
+      <figure class="interactive nested" id="merge-figure"><div class="figure-header"><div><div class="figure-kicker">图 07 / LAST-CTA MERGE</div><h4>同一请求的五个子任务与最终归约</h4></div></div><div class="stepper" id="merge-steps" role="group" aria-label="选择子任务完成阶段"></div><div id="merge-diagram" class="svg-scroll"></div><div id="merge-explanation" class="figure-explanation" aria-live="polite"></div></figure>
+      <div class="prose"><p>各分片的 softmax 使用了各自的最大值。合并时取全请求的最大值 <i>m</i>，把各分片的指数和换算到这个共同基准，得到权重 <i>w<sub>i</sub></i>，再对局部输出加权平均。</p><div class="equation"><math display="block"><mi>m</mi><mo>=</mo><munder><mi mathvariant="normal">max</mi><mi>i</mi></munder><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>,</mo></math><math display="block"><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo><msub><mi>l</mi><mrow><mi>i</mi></mrow></msub><msup><mi>e</mi><mrow><msub><mi>m</mi><mrow><mi>i</mi></mrow></msub><mo>−</mo><mi>m</mi></mrow></msup><mo>,</mo></math><math display="block"><mi>O</mi><mo>=</mo><mfrac><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><msub><mi>O</mi><mrow><mi>i</mi></mrow></msub></mrow><mrow><munder><mo>∑</mo><mi>i</mi></munder><msub><mi>w</mi><mrow><mi>i</mi></mrow></msub></mrow></mfrac></math></div><p>只有一个子任务的请求可以直接写出结果。有多个子任务时，计数器使用获取/释放语义，确保最终归约能读到先前各个 CTA 写出的局部结果。归约结束后，计数器复位。</p></div>
       <details class="experiment" id="decode-experiment"><summary><span class="detail-icon">＋</span><span><strong>实验配置、模型延迟与 HTTP 吞吐</strong><small>等长与长短混合请求 · 完整解码步 · HTTP 服务</small></span></summary><div class="experiment-body prose">
         <div class="config-grid"><div><small>设备 / 并行方式</small><strong>4 × RTX 5090 · TP4</strong></div><div><small>每张卡的注意力形状</small><strong>Q6 / KV1 / D256 · Page32</strong></div><div><small>每个请求的输出长度</small><strong>256 token</strong></div><div><small>计时窗口</small><strong>17–240 · 三轮中位数</strong></div></div>
-        <p>模型测试先预热四轮，再计时三轮，取中位数。单步计时包含模型执行、通信、LM Head 和采样。B9 使用补齐到 16 行的 CUDA Graph；两组长短混合负载分别由一个 128K 请求和 8 个或 31 个 4K 请求组成。</p>
+        <p>各组先预热四轮，再计时三轮取中位数。计时覆盖模型前向、四卡通信、输出词表投影和采样。九个请求的批次使用补齐到 16 行的 CUDA Graph。</p>
         <div class="table-wrap"><table><thead><tr><th>初始上下文</th><th>原生（ms）</th><th>分桶（ms）</th><th>延迟降低</th></tr></thead><tbody><tr><td>B1 · 512</td><td>10.0577</td><td>9.7397</td><td>3.16%</td></tr><tr><td>32 × 8K</td><td>17.9077</td><td>17.9361</td><td>−0.16%</td></tr><tr><td>128K + 8 × 4K</td><td>20.0353</td><td>14.3697</td><td>28.28%</td></tr><tr><td>128K + 31 × 4K</td><td>28.6256</td><td>18.1637</td><td>36.55%</td></tr></tbody></table></div>
-        <h4>HTTP 服务：计入排队、预填充和解码</h4><p>Native 与 Bucket 的独立 HTTP 对照使用官方 <code>vllm serve</code> 和 <code>vllm bench serve</code>，覆盖六种请求分布，两轮正式测试采用相反的执行顺序。每套配置完成 540 个请求。混合到达负载的输出吞吐提升 10.41%–11.36%，等长负载提升 0.03%–0.07%。</p><p>完整服务还包含排队和预填充，收益幅度与单步解码不同。在连续批处理（Continuous Batching）中，长短请求会进入同一批次；分桶缓解了其中的工作量失衡，也改善了这组混合请求的服务吞吐。</p>
+        <h4>HTTP 服务：计入排队、预填充和解码</h4><p>我们用 <code>vllm serve</code> 启动服务，用 <code>vllm bench serve</code> 回放六种请求分布。原生与分桶两套配置使用相同负载，两轮正式测试对调运行顺序，每套配置完成 540 个请求。</p><p>服务端同时承担排队、预填充和解码。长短请求混合到达时，分桶使每秒输出 token 数增加 10.41%–11.36%；等长负载下，两次对比的增幅为 0.03%–0.07%。</p>
         <p class="source-line">数据：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/decode.csv" target="_blank" rel="noopener">decode.csv ↗</a>　算法：<a href="#ref-7">XQA Bucket [7]</a>　来源：<a href="#ref-3">Tencent HPC-Ops [3]</a></p>
       </div></details>
     </div></details>
   </section>
 
   <section class="chapter" id="fusion">
-    <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">算子融合 / 直接生成下游输入</div><h2>算子融合：减少中间结果读写</h2></div></div>
-    <div class="prose"><p>前两章解决的是工作如何分配，接下来要减少计算过程中的数据搬运。低精度 GEMM 和注意力内核要求输入采用特定的量化格式、缩放因子和内存布局。如果上一个内核写出结果时就完成这些转换，就能省掉中间张量的写回、重读，以及单独的内核调用。</p><p>Blackwell 的每个 SM 有四个执行分区，各有自己的 warp 调度器、寄存器和执行单元，共用 SM 内的 L1 缓存与共享内存容量。两个内核分别执行时，上一个内核要先将结果写入全局内存，下一个内核再读取，读取时可能命中 L2。融合后，后续计算可以直接使用还在寄存器中的值。<a class="ref" href="#ref-16">[16]</a></p></div>
-    <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> 残差相加 + RMSNorm + NVFP4 量化</h3><p>进入 MLP 前，要先把输入与残差相加，执行 Gemma RMSNorm，再量化为 NVFP4。原生路径先将归一化结果存成 BF16 张量，量化内核再将它读回。融合内核在寄存器中完成归一化和 BF16 舍入，随后直接生成 FP4 数据及原生布局的缩放因子；更新后的残差仍以 BF16 写出。<a class="ref" href="#ref-10">[10]</a></p></div>
-    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">图 08 / MLP 输入</div><h4>保留残差输出，直接生成 NVFP4</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择归一化融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择归一化计算阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>内核每次处理隐藏状态的一行，将行归约、分组量化和缩放因子写入放在一起。这里的隐藏维度为 5120，每 16 个元素组成一个 NVFP4 量化组；缩放因子直接按下游 GEMM 所需的 swizzle 布局写出。</p></div>
-    <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK 归一化 + RoPE + KV 写入</h3><p>注意力计算之前，Q 和 K 需要归一化并应用旋转位置编码（RoPE），V 则需要量化后写入缓存。融合内核直接读取 QKV 投影结果，生成 BF16 格式的 Q 和门控张量，同时根据槽位映射（Slot Mapping），将 NVFP4 格式的 K/V 及缩放因子写入分页缓存。<a class="ref" href="#ref-11">[11]</a></p></div>
-    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">图 09 / 注意力输入</div><h4>Q 送入注意力内核，K/V 直接写入缓存页</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 QK 融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 QK 处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>融合内核将两类输出直接写到各自的位置：Q 供注意力内核读取，K/V 进入预先分配好的缓存页。分页方式、字节步长和量化缩放因子的约定均与原生缓存一致，下游 XQA 可以继续读取原有数据结构。</p></div>
-    <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> 注意力输出 + 门控 + FP8 量化</h3><p>注意力计算的最终结果还要乘上 <code>sigmoid(gate)</code>，再量化为输出投影所需的 FP8。我们把门控与量化放进注意力内核最终写出结果的阶段（Epilogue）：完成归一化与分片归约后，直接生成 FP8 输出。<a class="ref" href="#ref-12">[12]</a></p></div>
-    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">图 10 / 注意力输出</div><h4>最终结果直接量化，供输出投影使用</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择注意力输出路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择注意力输出处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
-    <div class="prose"><p>只有一个子任务时，直接在写出结果前执行门控和量化；有多个子任务时，则由 Last-CTA Merge 中负责最终归约的 CTA 执行。这样，每个请求都只在得到最终结果后做一次门控与量化，各分片的 softmax 计算和合并方式保持一致。</p></div>
-    <div class="prose" id="fusion-results"><h3>单个算子省下的时间，能带来多少整步收益</h3><p>在独立算子测试中，残差 / RMSNorm / NVFP4 融合使耗时降低约 <strong>33%–39%</strong>，QK 归一化 / RoPE / KV 写入融合降低约 <strong>52%–55%</strong>；注意力输出融合在完整 XQA 尾部测试中降低约 <strong>0.7%–1.3%</strong>。同时启用三项融合后，在批量为 1、8、16、32，上下文为 1K、2K 的测试中，完整 GPU 解码调用的耗时比未融合的同一 Bucket 路径降低 <strong>2.04%–7.18%</strong>。<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 算子融合</div><h4>从单个算子到完整解码步的延迟收益</h4></div></div><div class="fusion-result-grid"><div><small>独立算子测试</small><strong class="metric-range">33<span class="dash">–</span>39<span class="unit">%</span></strong><span>残差 / RMSNorm / NVFP4</span></div><div><small>独立算子测试</small><strong class="metric-range">52<span class="dash">–</span>55<span class="unit">%</span></strong><span>QK 归一化 / RoPE / KV 写入</span></div><div><small>完整 XQA 尾部测试</small><strong class="metric-range">0.7<span class="dash">–</span>1.3<span class="unit">%</span></strong><span>最终输出 / 门控 / FP8</span></div><div class="result-highlight"><small>完整 GPU 解码 · 含 LM Head</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>三项融合 / 相同 Bucket 路径</span></div></div></figure>
+    <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">CUDA / 算子融合</div><h2>解码中的三处算子融合</h2></div></div>
+    <div class="prose"><p>KV 分桶缩短了长短请求混合时的解码时间。即便请求一样长，解码过程中也有可以省去的读写。以 MLP 的输入为例，归一化算子刚写出一行 BF16 数据，量化算子就要把整行读回来，而 MLP 真正要读的是量化后的 FP4。</p><p>在 Blackwell SM 上，同一内核中的线程可以直接使用寄存器里的中间结果，各 warp 之间可以通过共享内存交换部分和。拆成两次内核调用，就要用全局内存把中间结果传给下一次调用。下面按张量大小计算这次写入和重读的字节数；其中有些读写会命中 L2，实际访问 GDDR7 的流量还取决于缓存命中情况。<a class="ref" href="#ref-16">[16]</a></p></div>
+    <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> 残差相加 + RMSNorm + NVFP4 量化</h3><p>MLP 之前有两个输出要保留：更新后的残差供后续层使用，归一化后的隐藏状态供 MLP 使用。原生实现先做残差加法和 Gemma RMSNorm，把两者都写成 BF16，再由量化算子读取第二份输出。隐藏维度是 5120，因此每个 token 只算这份中间结果，就要写 10 KiB、再读 10 KiB。<a class="ref" href="#ref-10">[10]</a></p></div>
+    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">图 08 / MLP 输入</div><h4>RMSNorm 到 NVFP4 量化的数据流</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择归一化融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择归一化计算阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>融合后，一个 CTA 处理一行隐藏状态。10 个 warp 分别计算平方和，warp 0 从共享内存读取部分和，得到整行的归一化系数。每个线程把手中的 16 个值按 BF16 舍入，随后在寄存器中打包成一组 NVFP4。残差照常以 BF16 写出；MLP 则直接读取 FP4 数据和按 GEMM 布局排列的缩放因子。这样就省去了上面计算的 20 KiB 中间读写。</p></div>
+    <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK 归一化 + RoPE + KV 写入</h3><p>注意力层的输入有两种去向。Q 经过归一化和旋转位置编码（RoPE）后，以 BF16 交给当前解码步的注意力算子。K 也要做归一化和旋转，但要和 V 一起量化成 NVFP4，写入后续各步还会读取的 KV 缓存。原生路径先写出旋转后的 K，另一个算子再读取它并写入缓存。<a class="ref" href="#ref-11">[11]</a></p></div>
+    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">图 09 / 注意力输入</div><h4>Q 的输出与 K/V 的分页写入</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择 QK 融合路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择 QK 处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>我们在算完旋转的地方直接量化 K，按照当前 token 分配到的页和槽位写入缓存。V 从投影结果直接量化，Q 和门控值仍按下游所需的 BF16 布局输出。以一个 256 维 K 头为例，这样省去 512 字节的中间写入和 512 字节的重读。缓存页布局与原生 XQA 一致。</p></div>
+    <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> 注意力输出 + 门控 + FP8 量化</h3><p>最后一处融合在注意力输出端。每张卡有 6 个 Q 头，每头输出 256 个 BF16 值，合计每个 token 3 KiB。原生实现先写出这个张量，后续算子再读入，乘上 <code>sigmoid(gate)</code> 并量化为输出投影需要的 FP8。<a class="ref" href="#ref-12">[12]</a></p></div>
+    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">图 10 / 注意力输出</div><h4>注意力输出的门控与 FP8 量化</h4></div><div class="segmented fusion-mode" role="group" aria-label="选择注意力输出路径"><button data-mode="before" aria-pressed="false">原生路径</button><button data-mode="after" aria-pressed="true">融合路径</button></div></div><div class="stepper fusion-steps" role="group" aria-label="选择注意力输出处理阶段"></div><div class="sm-architecture"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div></figure>
+    <div class="prose"><p>门控必须作用于完整注意力输出。一个请求只有一个子任务时，在该子任务写出结果前做门控和 FP8 量化；有多个子任务时，则放到最后一个 CTA 合并局部结果之后执行。两种情况都直接写出 FP8，省掉每张卡、每个 token 合计 6 KiB 的 BF16 中间读写。</p></div>
+    <div class="prose" id="fusion-results"><h3>算子耗时与完整解码耗时</h3><p>第一处融合将残差相加、RMSNorm 和 NVFP4 量化的合计耗时降低了 <strong>33%–39%</strong>。第二处将 QK 归一化、RoPE 和 KV 写入的合计耗时降低了 <strong>52%–55%</strong>。第三处改的是 XQA 最后的门控与写出，按完整 XQA 尾部计时，耗时下降 <strong>0.7%–1.3%</strong>。</p><p>把三处都接入分桶解码后，我们按完整 GPU 前向调用重新计时，包含输出词表投影。上下文取 1K 和 2K，批量分别取 1、8、16、32。在这些组合中，三项融合让耗时比分桶实现再降 <strong>2.04%–7.18%</strong>。<a class="ref" href="#ref-8">[8]</a></p></div>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">实测 / 算子融合</div><h4>三处融合各自的耗时降幅，以及同时启用后的整步降幅</h4></div></div><div class="fusion-result-grid"><div><small>独立算子测试</small><strong class="metric-range">33<span class="dash">–</span>39<span class="unit">%</span></strong><span>残差 / RMSNorm / NVFP4</span></div><div><small>独立算子测试</small><strong class="metric-range">52<span class="dash">–</span>55<span class="unit">%</span></strong><span>QK 归一化 / RoPE / KV 写入</span></div><div><small>完整 XQA 尾部测试</small><strong class="metric-range">0.7<span class="dash">–</span>1.3<span class="unit">%</span></strong><span>最终输出 / 门控 / FP8</span></div><div class="result-highlight"><small>完整 GPU 解码 · 含 LM Head</small><strong class="metric-range">2.04<span class="dash">–</span>7.18<span class="unit">%</span></strong><span>三项融合 / 相同 Bucket 路径</span></div></div></figure>
     <details class="deep-dive" id="fusion-implementation"><summary><span class="detail-icon">＋</span><span><strong>实现细节：数据布局、舍入位置与模型接入</strong><small>BF16 舍入 · NVFP4 分组缩放 · 静态 FP8 · HTTP 服务测试</small></span><span class="detail-badge">实现</span></summary><div class="details-body">
-      <div class="prose"><h3>三个融合算子各自写出什么格式？</h3><p>三个内核的输出都匹配原有下游接口。NormPack 生成 NVFP4 数据和 swizzle 布局的缩放因子；Front 生成 BF16 Q、BF16 门控张量，以及分页存储的 NVFP4 K/V；Tail 使用静态缩放因子生成 E4M3 FP8。归一化和 softmax 中的关键归约仍使用 FP32，原有流程中转为 BF16 的位置也保持不变，只是在寄存器中完成舍入。</p>
+      <div class="prose"><h3>输出布局与舍入精度</h3><p>NormPack 写出打包的 NVFP4 值和按 GEMM 要求重排的缩放因子。注意力输入端写出 BF16 的 Q 和门控值，并更新 NVFP4 的 K/V 缓存页。输出端用固定缩放因子写出 E4M3 格式的 FP8。下面的伪代码标出了每次舍入的位置：归一化和 softmax 的关键归约用 FP32，原流程中转为 BF16 的步骤移到寄存器中完成。</p>
       <div class="code-block"><div class="code-heading">三项融合的计算流程 / 伪代码</div><pre><code># ① Residual / Gemma RMSNorm / NVFP4
 h = fp32(x) + fp32(residual)
 residual_out = bf16(h)
@@ -212,18 +196,18 @@ o = bf16(final_attention_output)
 g = bf16(sigmoid(fp32(gate)))
 gated = bf16(fp32(o) * fp32(g))
 write_fp8_e4m3(gated / static_scale)</code></pre></div>
-      <p>启用 Fusion 配置后，模型初始化时会注册相应的执行与编译 Hook，复用已有的 Bucket CUDA Graph 和原生投影算子。融合内核直接生成下游要求的数据布局，因此可以接入原有的模型前向计算流程。</p></div>
+      <p>这三个内核在模型初始化时注册到相应的执行和编译入口。分桶路径使用的 CUDA Graph 和输出投影都可以继续复用。</p></div>
       <details class="experiment" id="fusion-experiment"><summary><span class="detail-icon">＋</span><span><strong>三组 HTTP 对照与完整配置</strong><small>Native / Bucket / Bucket + Fusion · 六种请求负载</small></span></summary><div class="experiment-body prose">
-        <p>服务测试分别运行 Native、Bucket、Bucket + Fusion 三套配置，使用相同的请求序列。每套配置先完成 180 个预热请求，再完成 360 个正式请求，两轮正式测试采用相反的配置执行顺序。输出吞吐按正式请求的输出 token 总数除以总耗时计算。</p>
+        <p>同一组请求分别在三套服务上回放：原生 vLLM、KV 分桶、KV 分桶加三项融合。每套配置先完成 180 个预热请求，再完成 360 个正式请求，两轮正式测试对调顺序。表中的吞吐等于正式请求生成的 token 总数除以总用时。</p>
         <div class="config-grid"><div><small>并行方式 / KV 预算</small><strong>TP4 · 每张卡 8 GiB</strong></div><div><small>上下文 / 并发上限</small><strong>128K · 32 个请求</strong></div><div><small>每批 token 预算</small><strong>2048</strong></div><div><small>编译区间</small><strong>[32, 2048]</strong></div></div>
         <div class="table-wrap"><table><thead><tr><th>请求负载</th><th>原生（tok/s）</th><th>分桶（tok/s）</th><th>分桶加融合（tok/s）</th><th>融合后吞吐变化</th></tr></thead><tbody><tr><td>单个短请求</td><td>92.64</td><td>99.00</td><td>100.74</td><td>+1.76%</td></tr><tr><td>32 个等长请求</td><td>332.85</td><td>332.53</td><td>327.68</td><td>−1.46%</td></tr><tr><td>16 个长短混合请求</td><td>248.03</td><td>255.70</td><td>252.99</td><td>−1.06%</td></tr><tr><td>32 个长短混合请求</td><td>226.56</td><td>243.97</td><td>241.84</td><td>−0.87%</td></tr><tr><td>混合到达 · 每秒 2 个请求</td><td>448.19</td><td>494.11</td><td>495.77</td><td>+0.33%</td></tr><tr><td>混合到达 · 每秒 8 个请求</td><td>452.48</td><td>496.57</td><td>497.74</td><td>+0.24%</td></tr></tbody></table></div>
-        <p>在分桶基础上再开融合，单个短请求的输出吞吐提高了 1.76%，32 个等长请求则下降了 1.46%。长短请求混合到达时，主要收益来自分桶，融合额外贡献了 0.24% 或 0.33%。这里计时覆盖整个 HTTP 请求，包括排队、预填充和解码。</p>
+        <p>融合对 HTTP 吞吐的影响随负载而变。和只开分桶相比，单个短请求的吞吐增加 1.76%，32 个等长请求的吞吐下降 1.46%。混合请求按每秒 2 个和 8 个到达时，融合额外提高了 0.33% 和 0.24%。这些数字包含服务端排队、预填充和解码的总用时。</p>
         <p class="source-line">数据：<a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/blob/main/benchmarks/http_fusion.csv" target="_blank" rel="noopener">http_fusion.csv ↗</a>　实现：<a href="#ref-10">NormPack [10]</a> · <a href="#ref-11">Front [11]</a> · <a href="#ref-12">Tail [12]</a></p>
       </div></details>
     </div></details>
   </section>
-  <section class="closing prose" id="closing"><h2>这些优化何时有效</h2><p>四个 32K 请求一起做预填充时，折返流水线把耗时从 4.30 秒降到 3.94 秒。解码时，一个长请求混在 31 个短请求里，会让多数 CTA 先做完，等待少数 CTA 处理剩余的 KV。分桶把长请求的工作分给更多 CTA 后，单步耗时从 28.63 毫秒降到 18.16 毫秒。在同一条分桶路径上，算子融合又省去了中间结果的写回和重读；在 1K 和 2K 上下文、批量为 1、8、16、32 的测试中，完整 GPU 解码步的耗时又降低了 2.04% 至 7.18%。</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">查看源码、配置与完整测试结果 <span aria-hidden="true">↗</span></a></section>
-  <section class="references" id="references"><div class="eyebrow">参考资料 / 实现源码</div><h2>参考资料与源码</h2><p>正文中的成本模型见相应公式；调度方法、数据流和实验结果可在以下论文、文档与源码中查阅。</p>
+  <section class="closing prose" id="closing"><h2>不同负载下的选择</h2><p>选择折返流水线时，先看同一时刻有多少块可供交错。四个等长请求同时预填充，8K 到 128K 都测到了收益；只有一个 8K 请求时，常规流水线用时更短。选择解码路径时，除了批量大小，还要看同批请求的 KV 长度。32 个请求全是 8K，分桶前后都是 17.9 毫秒；换成一个 128K 加 31 个 4K，分桶使单步解码缩短了 10.47 毫秒。</p><p>算子融合可以单独考察：先根据中间张量的形状找出可省的读写，再测整个解码步。三处融合里，注意力输入端的独立算子降幅最大；部署后的吞吐，还要回到相同的请求序列上比较。</p><a class="closing-repo" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">查看源码、配置与完整测试结果 <span aria-hidden="true">↗</span></a></section>
+  <section class="references" id="references"><div class="eyebrow">参考资料 / 实现源码</div><h2>参考资料与源码</h2>
     <ol class="reference-list">
       <li id="ref-1"><a href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener">Qwen3.8 SM120: VPP & Bucket Attention <span>↗</span></a><small>项目说明、安装方法与整体架构。</small></li>
       <li id="ref-2"><a href="https://github.com/RookieCoder-Camera/vllm-ascend/blob/c409752993b80524e4af6b98ef3b69a8f9c13f2c/vllm_ascend/distributed/vpp_utils.py" target="_blank" rel="noopener">VPP 作者实现 · vLLM-Ascend <span>↗</span></a><small>折返式模型层划分，以及批次在各流水级间继续执行的调度顺序。</small></li>
@@ -248,17 +232,17 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 <aside class="toc" id="toc" aria-label="文章目录">
   <div class="toc-heading">本文目录<span id="read-percent">0%</span></div>
   <nav>
-    <a href="#intro" class="toc-main">推理优化的三个层次</a>
+    <a href="#intro" class="toc-main">摘要</a>
     <a href="#prefill" class="toc-chapter"><span>01</span> 预填充 · 四卡流水线</a>
-    <a href="#prefill-cost" class="toc-sub">后面的块为什么更慢</a>
+    <a href="#prefill-cost" class="toc-sub">块长与单级耗时</a>
     <a href="#prefill-fold" class="toc-sub">折返式 VPP</a>
     <a href="#pipeline-figure" class="toc-sub">PP / VPP 时间线</a>
     <a href="#prefill-results" class="toc-sub">长上下文性能</a>
     <a href="#vpp-implementation" class="toc-sub" data-expand>单卡内的收发与计算</a>
-    <a href="#decode" class="toc-chapter"><span>02</span> 解码 · 按 KV 长度分工</a>
-    <a href="#decode-load" class="toc-sub">长短请求的工作量差距</a>
+    <a href="#decode" class="toc-chapter"><span>02</span> 解码 · KV 分桶</a>
+    <a href="#decode-load" class="toc-sub">每个 CTA 的 KV 块数</a>
     <a href="#split-strategies" class="toc-sub">从 Split-KV 到分桶</a>
-    <a href="#bucket-figure" class="toc-sub">图解：分桶与执行</a>
+    <a href="#bucket-figure" class="toc-sub">KV 分桶与线程块</a>
     <a href="#decode-results" class="toc-sub">模型延迟与服务吞吐</a>
     <a href="#decode-implementation" class="toc-sub" data-expand>局部结果与最终归约</a>
     <a href="#fusion" class="toc-chapter"><span>03</span> 算子融合 · 减少读写</a>
@@ -266,7 +250,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     <a href="#fusion-front" class="toc-sub">QK / RoPE / KV 写入</a>
     <a href="#fusion-tail" class="toc-sub">注意力输出 / 门控 / FP8</a>
     <a href="#fusion-results" class="toc-sub">算子与整步耗时</a>
-    <a href="#closing" class="toc-main">这些优化何时有效</a>
+    <a href="#closing" class="toc-main">不同负载下的选择</a>
     <a href="#references" class="toc-main">参考资料与源码</a>
   </nav>
   <div class="toc-bottom"><span class="dot"></span> SM120 · RTX 5090<br><span class="muted">Qwen3.8 · NVFP4 · vLLM</span></div>

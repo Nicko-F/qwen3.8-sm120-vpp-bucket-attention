@@ -21,7 +21,7 @@
   },
   "pipe.fill": {
     "en": "Fill",
-    "zh-CN": "填满流水线"
+    "zh-CN": "流水线填充"
   },
   "pipe.turn": {
     "en": "Turn",
@@ -29,11 +29,11 @@
   },
   "pipe.steady": {
     "en": "Interleave",
-    "zh-CN": "去回程交错"
+    "zh-CN": "交错执行"
   },
   "pipe.drain": {
     "en": "Drain",
-    "zh-CN": "排空"
+    "zh-CN": "流水线排空"
   },
   "overview": {
     "en": "Overview",
@@ -49,39 +49,39 @@
   },
   "pipe.tip": {
     "en": "<strong>{0} · GPU{1} · C{2}</strong>Stage {3} · {4}<br>Prior context: {5}C<br>Start: {6} u<br>End: {7} u<br>Duration: {8} u",
-    "zh-CN": "<strong>{0} · GPU{1} · C{2}</strong>流水级 S{3} · {4}<br>历史长度：{5}C<br>开始：{6} u<br>结束：{7} u<br>耗时：{8} u"
+    "zh-CN": "<strong>{0} · GPU{1} · C{2}</strong>流水级 S{3} · {4}<br>此前上下文：{5}C<br>开始：{6} u<br>结束：{7} u<br>耗时：{8} u"
   },
   "pipe.timeline": {
     "en": "{0} compute timeline across four GPUs",
-    "zh-CN": "{0}四卡计算时间线"
+    "zh-CN": "{0} 的四卡计算时间线"
   },
   "pipe.startNote": {
     "en": "C0 starts on GPU0. CPP runs 16 layers per stage and VPP runs eight. Both paths process all 64 layers.",
-    "zh-CN": "GPU0 开始处理第一块。CPP 一次算 16 层，VPP 一次算 8 层。两种排程都要把这一块的 64 层算完。"
+    "zh-CN": "首块 C0 从 GPU0 开始执行。CPP 的每个流水级包含 16 层，VPP 的每个流水级包含 8 层；两种调度均为每块执行全部 64 层。"
   },
   "pipe.fillNote": {
     "en": "Each GPU starts as soon as its input arrives. GPU0 keeps admitting chunks. The VPP warmup counts are <strong>7 / 5 / 3 / 1</strong>, so inner ranks begin the return leg first.",
-    "zh-CN": "GPU0 继续接收新块，后面的卡一拿到输入就开始算。GPU0 到 GPU3 分别先处理 <strong>7、5、3、1</strong> 个去程块，再接回程块。"
+    "zh-CN": "GPU0 持续处理新块，后续 GPU 在输入就绪后开始计算。VPP 的 GPU0 至 GPU3 分别先执行 <strong>7、5、3、1</strong> 个去程块，随后进入去程与回程交错的阶段。"
   },
   "pipe.turnNote": {
     "en": "C0 reaches GPU3 and moves locally from S3 to S4. Older chunks start the return leg while newer ones move forward. Both legs share the compute stream on each rank.",
-    "zh-CN": "第一个块 C0 在 GPU3 上算完 S3，接着算 S4，开始回程。这时，新块仍从 GPU0 向 GPU3 推进。"
+    "zh-CN": "C0 在 GPU3 上完成 S3 后，就地执行 S4，进入回程。与此同时，后续块继续沿 GPU0 至 GPU3 的方向执行。每张 GPU 的去程和回程任务共用一条计算流。"
   },
   "pipe.steadyNote": {
     "en": "Each GPU alternates between an older chunk on the return leg and a newer chunk on the forward leg. Eight-layer stages let work on the second half of the network start earlier.",
-    "zh-CN": "每张卡轮流做两件事：算旧块在回程的 8 层，再算新块在去程的 8 层。"
+    "zh-CN": "每张 GPU 交替执行较早块的回程任务与后续块的去程任务，每项任务计算 8 层。较小的流水级使前半部分与后半部分网络的计算得以交错。"
   },
   "pipe.drainNote": {
     "en": "All chunks have entered the pipeline. VPP finishes the remaining return stages. CPP still has to move the last, most expensive chunks through its physical stages.",
-    "zh-CN": "所有块都已进入流水线。VPP 只需算完剩余的回程块。CPP 中，最后一个块还要逐卡经过后面的流水级。"
+    "zh-CN": "全部块均已进入流水线。VPP 继续执行尚未完成的回程任务；CPP 中，末尾块仍需依次完成后续 GPU 上的流水级。"
   },
   "pipe.uniformNote": {
     "en": "With equal chunk costs, both schedules finish together. Select increasing costs to see how a growing KV history changes pipeline fill and drain.",
-    "zh-CN": "当各块耗时相同时，两种排程的总耗时也相同。把“每块耗时”切到“逐步增长”，可以看到后面的卡要多等多久。"
+    "zh-CN": "在等耗时模型中，两种调度的总耗时相同。选择“逐步增长”，可比较块耗时随上下文增长时的执行顺序与空闲时间。"
   },
   "pipe.growthNote": {
     "en": "In this model CPP finishes at <strong>{0} u</strong> and VPP at <strong>{1} u</strong>. The amount of compute is the same. Stage size and local execution order determine the difference.",
-    "zh-CN": "同样的计算量，CPP 用了 <strong>{0} u</strong>，VPP 用了 <strong>{1} u</strong>。图中以 CPP 第一级处理首块的时间为一个单位（u）。"
+    "zh-CN": "该模型下，CPP 的总耗时为 <strong>{0} u</strong>，VPP 为 <strong>{1} u</strong>。两者总计算量相同，差别来自流水级大小与执行顺序。一个时间单位 u 等于 CPP 第一级处理首块的耗时。"
   },
   "pipe.cppIdle": {
     "en": "CPP idle per GPU",
@@ -89,7 +89,7 @@
   },
   "pipe.elapsed": {
     "en": "Average over the full schedule",
-    "zh-CN": "从第一块开始到最后一块结束"
+    "zh-CN": "统计区间：首块开始至末块完成"
   },
   "pipe.vppIdle": {
     "en": "VPP idle per GPU",
@@ -101,7 +101,7 @@
   },
   "pipe.delta": {
     "en": "Modeled time saved",
-    "zh-CN": "VPP 总耗时降幅"
+    "zh-CN": "模型中 VPP 的耗时降幅"
   },
   "dma.ready": {
     "en": "Output ready",
@@ -117,7 +117,7 @@
   },
   "dma.pipeline": {
     "en": "Overlap segments",
-    "zh-CN": "分段流水"
+    "zh-CN": "分段传输重叠"
   },
   "dma.received": {
     "en": "Input ready",
@@ -125,7 +125,7 @@
   },
   "dma.release": {
     "en": "Consume and release",
-    "zh-CN": "回收缓冲槽"
+    "zh-CN": "释放接收槽"
   },
   "dma.outputEvent": {
     "en": "Output event",
@@ -153,7 +153,7 @@
   },
   "dma.cycle": {
     "en": "Reuse after H2D",
-    "zh-CN": "每段传完即可复用"
+    "zh-CN": "H2D 完成后分段复用"
   },
   "dma.consuming": {
     "en": "Stage reading",
@@ -169,27 +169,27 @@
   },
   "dma.readyNote": {
     "en": "GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the host proxy thread can prepare its segments.",
-    "zh-CN": "GPU0 分别记录残差和隐藏状态的就绪事件。每份输出算好后，主机代理线程就能安排相应的数据段传输。"
+    "zh-CN": "GPU0 为残差与隐藏状态分别记录输出就绪事件。某一张量就绪后，主机代理线程即可提交其各数据段的传输。"
   },
   "dma.d2hNote": {
     "en": "The host queues one segment's D2H copy and its completion event on the send stream, then publishes READY with the event generation the receiver should wait for.",
-    "zh-CN": "GPU0 的代理线程把一段数据的 D2H 拷贝和完成事件排入发送流，并发出 READY，告诉接收端这一次该等哪个事件。"
+    "zh-CN": "GPU0 的代理线程在发送流中依次提交一段数据的 D2H 拷贝与完成事件，随后发布 READY，标明接收端需要等待的事件及其复用轮次。"
   },
   "dma.h2dNote": {
     "en": "GPU1 queues <strong>Wait(D2H event) → H2D → H2D event</strong>, then publishes ACK. The copy engine starts H2D as soon as the D2H dependency is satisfied.",
-    "zh-CN": "GPU1 先把<strong>等待 D2H 完成、执行 H2D、记录完成事件</strong>排入接收流，再发出 ACK。上游拷贝完成时，GPU1 的拷贝引擎就能开始搬这一段。"
+    "zh-CN": "GPU1 在接收流中依次提交<strong>等待 D2H 事件、执行 H2D、记录 H2D 完成事件</strong>，随后发布 ACK。D2H 依赖满足后，GPU1 的拷贝引擎即可执行该段的 H2D。"
   },
   "dma.pipelineNote": {
     "en": "D2H for one segment overlaps H2D for the previous segment. Eight host segments carry the full 160 MiB boundary in turns. Reusing a ring position requires its ACK and H2D completion.",
-    "zh-CN": "上游把下一段搬到主机时，下游可以同时取走上一段。160 MiB 的数据分十次经过主机上的八段缓冲。发送端收到对应的 ACK，并确认 H2D 已完成，就能复用那一段空间。"
+    "zh-CN": "下一段的 D2H 可与上一段的 H2D 重叠。图中 160 MiB 数据划为十段，通过主机上的八个缓冲段循环传输。复用某个缓冲段前，发送端须收到对应 ACK，并确认该段 H2D 已完成。"
   },
   "dma.receivedNote": {
     "en": "GPU1 has the full input. Its compute stream passes the receive event and starts S1(C0). GPU0 has released its source slot after D2H, and this chunk has passed through the host ring.",
-    "zh-CN": "整块输入到达 GPU1 后，计算流开始算 S1(C0)。此时 GPU0 已发完这块数据，可以复用输出槽。"
+    "zh-CN": "整块输入传至 GPU1 后，计算流等待接收完成事件，再执行 S1(C0)。GPU0 的输出槽在该块 D2H 完成后即可复用。"
   },
   "dma.releaseNote": {
     "en": "When S1(C0) finishes reading the input, its consumer event releases the receive slot. Source slots, host segments and receive slots become reusable at different points, each after its last reader finishes.",
-    "zh-CN": "等 GPU1 算完 S1(C0)，接收槽就能给下一块使用。输出槽、主机缓冲区和接收槽的回收时间各自取决于最后一次读取何时结束。"
+    "zh-CN": "S1(C0) 完成对输入的最后一次读取后，消费事件释放 GPU1 的接收槽。输出槽、主机缓冲段和接收槽分别在各自的最后一次读取完成后复用。"
   },
   "load.native": {
     "en": "Native uniform split",
@@ -197,7 +197,7 @@
   },
   "load.active": {
     "en": "Active CTAs: {0} / 170",
-    "zh-CN": "有工作的 CTA：{0} / 170"
+    "zh-CN": "执行计算的 CTA：{0} / 170"
   },
   "load.tasks": {
     "en": "<br>Tasks: {0}",
@@ -205,19 +205,19 @@
   },
   "load.diagram": {
     "en": "KV work across 170 CTAs under native splitting and global bucketing",
-    "zh-CN": "原生 XQA 和 KV 分桶时各 CTA 分到的工作量"
+    "zh-CN": "原生 XQA 与全局 KV 分桶下，170 个 CTA 各自处理的 KV 块数"
   },
   "load.nativeMax": {
     "en": "Heaviest native CTA",
-    "zh-CN": "原生路径最忙的 CTA"
+    "zh-CN": "原生：单个 CTA 的最大块数"
   },
   "load.bucketMax": {
     "en": "Heaviest bucket CTA",
-    "zh-CN": "分桶后最忙的 CTA"
+    "zh-CN": "分桶：单个 CTA 的最大块数"
   },
   "load.batch": {
     "en": "Whole batch",
-    "zh-CN": "整批请求的工作量"
+    "zh-CN": "整批请求的 KV 块总数"
   },
   "load.counts": {
     "en": "{0} tasks · {1} active buckets",
@@ -225,7 +225,7 @@
   },
   "load.uniformStart": {
     "en": "With uniform context lengths the native split already balances work. The heaviest CTA in either schedule handles <strong>",
-    "zh-CN": "请求长度相同时，原生划分本来就很均匀。两种方法里，最忙的 CTA 都处理 <strong>"
+    "zh-CN": "请求等长时，原生划分已能均匀分配 KV 块。两种方法中，单个 CTA 处理的最大块数均为 <strong>"
   },
   "load.uniformEnd": {
     "en": " tiles</strong>.",
@@ -233,7 +233,7 @@
   },
   "load.skewNote": {
     "en": "Native splitting concentrates the long request on a few CTAs. The busiest handles <strong>{0} tiles</strong>. Global buckets assign about <strong>{1} tiles</strong> each and start a new task wherever a bucket crosses a request boundary.",
-    "zh-CN": "原生划分把长请求交给少数 CTA，最忙的一个要处理 <strong>{0} 块</strong>。分桶后，每个 CTA 最多处理 <strong>{1} 块</strong>。同一个桶跨到下一个请求时，会新开一个子任务。"
+    "zh-CN": "原生划分为每个请求分配相同数量的 CTA，单个 CTA 最多需处理 <strong>{0} 个 KV 块</strong>。全局分桶将这一上限降至 <strong>{1} 块</strong>；桶内每跨过一个请求边界，就划出一个新的子任务。"
   },
   "bucket.requests": {
     "en": "Requests",
@@ -249,7 +249,7 @@
   },
   "bucket.partials": {
     "en": "Write partials",
-    "zh-CN": "合并局部结果"
+    "zh-CN": "按请求合并"
   },
   "bucket.cost": {
     "en": "KV length sets the workload",
@@ -261,7 +261,7 @@
   },
   "bucket.summary": {
     "en": "{0} tiles total · {1} CTAs available · {2} tiles per bucket",
-    "zh-CN": "共 {0} 块，分给 {1} 个 CTA，每桶最多 {2} 块"
+    "zh-CN": "共 {0} 个 KV 块，{1} 个 CTA，每桶最多 {2} 块"
   },
   "bucket.skew": {
     "en": "B32: one long request and 31 short ones",
@@ -273,7 +273,7 @@
   },
   "bucket.budgetTitle": {
     "en": "Common work budget",
-    "zh-CN": "每桶分多少"
+    "zh-CN": "每桶的 KV 块数上限"
   },
   "bucket.budgetCalc": {
     "en": "{0} / 170 → {1} tiles per bucket",
@@ -281,11 +281,11 @@
   },
   "bucket.identity": {
     "en": "Keep request identity",
-    "zh-CN": "区分桶内的请求"
+    "zh-CN": "保留请求边界"
   },
   "bucket.boundary": {
     "en": "Start a new task at each request boundary",
-    "zh-CN": "遇到新请求就新建子任务"
+    "zh-CN": "跨请求边界时新建子任务"
   },
   "bucket.example": {
     "en": "8 buckets, 9 tasks",
@@ -293,7 +293,7 @@
   },
   "bucket.select": {
     "en": "170 buckets · Select a CTA to inspect its tasks",
-    "zh-CN": "点击一个 CTA，查看分给它的子任务"
+    "zh-CN": "选择 CTA，查看其桶内子任务"
   },
   "bucket.empty": {
     "en": "Empty bucket",
@@ -317,7 +317,7 @@
   },
   "bucket.readTiles": {
     "en": "Traverse its KV tile range",
-    "zh-CN": "遍历分到的 KV 块"
+    "zh-CN": "遍历所分配的 KV 块"
   },
   "bucket.softmax": {
     "en": "Update the online softmax",
@@ -337,7 +337,7 @@
   },
   "bucket.mergeTitle": {
     "en": "Write one partial per task and merge by request",
-    "zh-CN": "各子任务分别写出结果，再按请求合并"
+    "zh-CN": "写出子任务的局部结果，按请求合并"
   },
   "bucket.taskCount": {
     "en": "Tasks: {0}",
@@ -349,11 +349,11 @@
   },
   "bucket.other": {
     "en": "Other requests follow the same partial-to-merge path to their own outputs.",
-    "zh-CN": "其余请求也各自合并局部结果。"
+    "zh-CN": "其余请求按相同方式合并各自的局部结果。"
   },
   "bucket.diagram": {
     "en": "Step through KV tiles, tasks and buckets",
-    "zh-CN": "从 KV 分块到子任务分配，再到按请求合并结果"
+    "zh-CN": "KV 分块、分桶、子任务执行与按请求归约"
   },
   "bucket.total": {
     "en": "Total KV work",
@@ -365,15 +365,15 @@
   },
   "bucket.budget": {
     "en": "Bucket budget",
-    "zh-CN": "每桶最多容纳"
+    "zh-CN": "每桶的 KV 块数上限"
   },
   "bucket.active": {
     "en": "Active CTAs: {0}",
-    "zh-CN": "{0} 个 CTA 分到了工作"
+    "zh-CN": "{0} 个 CTA 执行计算"
   },
   "bucket.slots": {
     "en": "Task / partial slots",
-    "zh-CN": "局部结果槽数"
+    "zh-CN": "子任务 / 局部结果槽数"
   },
   "bucket.count": {
     "en": "Buckets: {0}",
@@ -381,19 +381,19 @@
   },
   "bucket.requestsNote": {
     "en": "Read the KV lengths for this batch. Each request keeps its own Q, KV page table and output position.",
-    "zh-CN": "每个请求都有自己的 Q、KV 页表和输出位置。分桶先读取这一批请求各自的 KV 长度。"
+    "zh-CN": "分桶首先读取当前批次中各请求的 KV 长度。每个请求保留独立的 Q、KV 页表和输出位置。"
   },
   "bucket.tilesNote": {
     "en": "Count tiles in units of 256 tokens, then compute their global prefix offsets. Each tile retains its request ID. KV data stays in the paged cache.",
-    "zh-CN": "每 256 个 token 划为一个 KV 块。把各请求的块数依次累加，就能算出每个请求的起止编号。调度只用这些编号，KV 数据仍在原来的缓存页里。"
+    "zh-CN": "以 256 个 token 为一个 KV 块，按请求计算块数，再用前缀和确定各请求在全局块序列中的区间。每块保留所属请求编号，KV 数据仍位于原有缓存页中。"
   },
   "bucket.packNote": {
     "en": "Each bucket has a budget of <strong>{0} tiles</strong>. CTA {1} has <strong>{2} task(s)</strong>{3}",
-    "zh-CN": "每桶最多装 <strong>{0} 块 KV</strong>。CTA {1} 分到 <strong>{2} 个子任务</strong>{3}"
+    "zh-CN": "每桶最多包含 <strong>{0} 个 KV 块</strong>。CTA {1} 的桶内有 <strong>{2} 个子任务</strong>{3}"
   },
   "bucket.cross": {
     "en": " because its range crosses a request boundary.",
-    "zh-CN": "，分别属于不同请求。"
+    "zh-CN": "，对应桶内不同请求的 KV 区间。"
   },
   "bucket.same": {
     "en": " within a single request.",
@@ -401,11 +401,11 @@
   },
   "bucket.runNote": {
     "en": "A CTA walks its bucket in task order. All tiles in a task share an online softmax accumulator. Finishing the task publishes one partial result.",
-    "zh-CN": "每个 CTA 依次执行桶内的子任务。在一个子任务内，每处理一个 KV 块就更新一次在线 softmax，处理完最后一块才写出局部结果。"
+    "zh-CN": "每个 CTA 按顺序执行桶内子任务。一个子任务只处理同一请求的 KV 块，并维护独立的在线 softmax 状态；遍历完所分配的块后，写出一份局部结果。"
   },
   "bucket.mergeNote": {
     "en": "A counter collects partials for each request. The CTA that finishes the last task reads all its partials and writes the final O. A single-task request writes O directly.",
-    "zh-CN": "每个请求单独计数。最后完成子任务的 CTA 读取该请求的全部局部结果，合并得到 O。如果整个请求只有一个子任务，就直接写出 O。"
+    "zh-CN": "每个请求独立记录已完成的子任务数。最后完成的子任务所在 CTA 读取该请求的全部局部结果，归约后写出最终输出 O。只有一个子任务的请求直接写出 O。"
   },
   "bucket.table": {
     "en": "<table><thead><tr><th>Task</th><th>Request</th><th>KV tile range</th><th>Count</th><th>Bucket / CTA</th></tr></thead><tbody>",
@@ -441,7 +441,7 @@
   },
   "merge.running": {
     "en": "Running",
-    "zh-CN": "计算"
+    "zh-CN": "计算中"
   },
   "merge.wait": {
     "en": "Await partial",
@@ -449,11 +449,11 @@
   },
   "merge.counter": {
     "en": "Completions",
-    "zh-CN": "完成计数"
+    "zh-CN": "已完成子任务数"
   },
   "merge.winner": {
     "en": "Performs merge",
-    "zh-CN": "负责最终归约"
+    "zh-CN": "执行最终归约"
   },
   "merge.output": {
     "en": "6 × 256 / final",
@@ -465,7 +465,7 @@
   },
   "merge.reweight": {
     "en": "Read 5 partials → reweight by softmax mass",
-    "zh-CN": "读取五份局部结果，重新计算权重"
+    "zh-CN": "读取五份局部结果，按 softmax 权重合并"
   },
   "merge.order": {
     "en": "Finish order: T2 → T0 → T4 → T3 → T1",
@@ -473,7 +473,7 @@
   },
   "merge.reset": {
     "en": "Write output and reset counter",
-    "zh-CN": "写出结果，本轮计数复位"
+    "zh-CN": "写出最终结果，复位完成计数器"
   },
   "merge.publish": {
     "en": "Each finisher publishes its own partial",
@@ -481,31 +481,31 @@
   },
   "merge.diagram": {
     "en": "Five tasks publish partials in completion order and the last CTA merges them",
-    "zh-CN": "五个子任务陆续完成，最后一个 CTA 合并结果"
+    "zh-CN": "五个子任务写出局部结果，最后完成的 CTA 按请求归约"
   },
   "merge.startNote": {
     "en": "R0 has five tasks on different CTAs. Each has its own scratch slot.",
-    "zh-CN": "请求 R0 分成五个子任务，分别在不同 CTA 上执行。每个子任务在显存里都有自己的结果槽。"
+    "zh-CN": "请求 R0 划分为五个子任务，分别在不同 CTA 上执行。每个子任务在全局内存中占用独立的局部结果槽。"
   },
   "merge.t2Note": {
     "en": "T2 finishes first, stores O₂, m₂ and l₂, then increments the completion count for R0.",
-    "zh-CN": "T2 最先完成。它写入 O₂、m₂ 和 l₂，再给 R0 的完成计数加一。"
+    "zh-CN": "T2 首先完成，将局部输出 O₂、最大值 m₂ 和指数和 l₂ 写入结果槽，再将 R0 的完成计数加一。"
   },
   "merge.t0Note": {
     "en": "T0 finishes. Two partials are ready in scratch while the other tasks keep running.",
-    "zh-CN": "T0 也算完了。现在有两份局部结果可以读取，另外三个子任务还在算。"
+    "zh-CN": "T0 完成并写出局部结果。此时两份局部结果已就绪，其余三个子任务继续计算。"
   },
   "merge.t4Note": {
     "en": "T4 has finished. T3 and T1 are still running. Completion order determines which CTA will merge the results.",
-    "zh-CN": "T4 写入第三份结果。T3 和 T1 还在算，谁最后完成就由谁合并。"
+    "zh-CN": "T4 写入第三份局部结果，T3 与 T1 仍在计算。最终归约由最后完成的子任务所在 CTA 执行。"
   },
   "merge.t3Note": {
     "en": "Four partials are ready. The CTA running T1 is finishing the last task.",
-    "zh-CN": "T3 写入第四份结果，只剩 T1。"
+    "zh-CN": "T3 写入第四份局部结果；T1 是唯一尚未完成的子任务。"
   },
   "merge.t1Note": {
     "en": "T1 increments the counter and sees the previous value 4. As the last finisher it reads all five partials, reweights them by softmax mass and writes O_R0.",
-    "zh-CN": "T1 更新计数时读到旧值 4，知道自己是第五个。它读出五份局部结果，按各自的 softmax 权重合并，写出请求 R0 的输出。"
+    "zh-CN": "T1 所在 CTA 更新完成计数时读到旧值 4，因此执行最终归约：读取五份局部结果，根据各自的最大值与指数和计算权重，合并后写出 R0 的最终输出。"
   },
   "fusion.readInput": {
     "en": "Read input",
@@ -513,7 +513,7 @@
   },
   "fusion.normQuant": {
     "en": "Normalize and pack",
-    "zh-CN": "归一化与量化"
+    "zh-CN": "归一化与 FP4 打包"
   },
   "fusion.gemm": {
     "en": "Feed GEMM",
@@ -525,7 +525,7 @@
   },
   "fusion.qkv": {
     "en": "Process Q, K and V",
-    "zh-CN": "归一化与旋转"
+    "zh-CN": "处理 Q、K、V"
   },
   "fusion.store": {
     "en": "Write outputs",
@@ -533,7 +533,7 @@
   },
   "fusion.final": {
     "en": "Finish attention",
-    "zh-CN": "合并注意力结果"
+    "zh-CN": "完成注意力归约"
   },
   "fusion.gateQuant": {
     "en": "Gate and quantize",
@@ -553,59 +553,59 @@
   },
   "norm.inputNote": {
     "en": "Read x, the residual and the norm weights. One CTA adds the residual and reduces the sum of squares across a row of 5,120 elements.",
-    "zh-CN": "一个 CTA 处理一行 5120 个元素。它读取输入、残差和归一化权重，先做残差加法，再对一行的平方和做归约。"
+    "zh-CN": "每个 CTA 处理一行 5120 个元素，读取输入 x、残差与归一化权重。残差相加后，对该行元素的平方和进行归约。"
   },
   "norm.fusedNote": {
     "en": "Each warp reduces its sum of squares by shuffle. Ten FP32 partials meet in shared memory; warp 0 computes the inverse RMS. Each thread rounds 16 normalized values to BF16 and packs them with one E4M3 scale.",
-    "zh-CN": "每个 warp 先用 shuffle 求出自己的部分和。10 个 FP32 部分和写入共享内存，由 warp 0 汇总并计算均方根的倒数。每个线程把 16 个归一化结果舍入为 BF16，再用同一个 E4M3 缩放因子打包成 FP4。"
+    "zh-CN": "每个 warp 通过 shuffle 归约平方和。10 个 FP32 局部和经共享内存交给 warp 0，计算均方根的倒数。每个线程将 16 个归一化结果舍入为 BF16，再共用一个 E4M3 缩放因子量化并打包为 FP4。"
   },
   "norm.nativeNote": {
     "en": "Add and RMSNorm produce BF16 y. A separate quantizer reads that tensor and packs it into NVFP4.",
-    "zh-CN": "残差相加和 RMSNorm 先算出 BF16 张量 y，写入全局内存。随后量化算子重新读取 y，打包成 NVFP4。"
+    "zh-CN": "残差相加与 RMSNorm 生成 BF16 张量 y，并将其写入全局内存。独立的量化算子随后读取 y，生成 NVFP4 数据。"
   },
   "norm.outNote": {
     "en": "The kernel writes the <strong>BF16 residual, packed FP4 values and native-layout scales</strong>. The MLP GEMM reads the packed input directly.",
-    "zh-CN": "融合算子写出<strong>更新后的 BF16 残差、打包好的 FP4 值和按原有布局排列的缩放因子</strong>。MLP 可以直接读取这份输入做矩阵乘法。"
+    "zh-CN": "融合算子写出<strong>更新后的 BF16 残差、打包后的 FP4 值与原生布局的缩放因子</strong>，供后续 MLP GEMM 直接读取。"
   },
   "norm.unfusedOut": {
     "en": "The BF16 residual is retained. A separate quantization stage supplies packed FP4 and scales to the MLP GEMM.",
-    "zh-CN": "残差以 BF16 写出。另一个量化算子写出 FP4 值和缩放因子，供 MLP 读取。"
+    "zh-CN": "残差以 BF16 格式写出。独立量化算子生成 FP4 值与缩放因子，供后续 MLP GEMM 读取。"
   },
   "front.inputNote": {
     "en": "Read the QKV projection outputs, positions, slot mapping and quantization scales. The Q side also supplies the gate used after attention.",
-    "zh-CN": "输入包括 QKV 投影结果、位置、缓存槽位和量化缩放因子。Q 分支还带有后面要用的门控值。"
+    "zh-CN": "算子读取 QKV 投影结果、位置、缓存槽位映射与量化缩放因子。Q 分支同时提供注意力输出阶段所需的门控值。"
   },
   "front.fusedNote": {
     "en": "One 128-thread CTA handles a token and a Q or K head. Four warps combine their sums through shared memory. On the K path, rotated values feed the FP4 packer directly. V is read from the projection and packed for the same cache slot.",
-    "zh-CN": "每个 CTA 有 128 个线程，处理一个 token 的一个 Q 头或 K 头。四个 warp 通过共享内存合并平方和。K 旋转后立即打包成 FP4，V 则从投影结果直接量化。二者写到同一个 token 对应的缓存位置。"
+    "zh-CN": "每个 CTA 使用 128 个线程，处理一个 token 的一个 Q 头或 K 头。四个 warp 通过共享内存归约平方和。K 经 RoPE 后直接量化并打包为 FP4；V 从投影结果量化并打包，写入同一 token 对应的 KV 缓存槽位。"
   },
   "front.nativeNote": {
     "en": "Q and K first undergo their per-head transforms. A subsequent quantize-and-append stage reads K and V and writes their pages.",
-    "zh-CN": "先对 Q 和 K 做归一化和旋转，写出中间结果。后续算子再读取 K 和 V，量化后追加到分页 KV 缓存。"
+    "zh-CN": "Q 与 K 经逐头归一化和 RoPE 后写出中间结果。后续量化与缓存写入算子读取 K、V，量化后写入分页 KV 缓存。"
   },
   "front.outNote": {
     "en": "Attention receives <strong>BF16 Q and the gate</strong>, plus <strong>NVFP4 K/V and scales</strong> in the paged cache. It reads the existing page table and native data layout.",
-    "zh-CN": "算子写出 <strong>BF16 的 Q 和门控值</strong>，并把 <strong>NVFP4 的 K/V 和缩放因子</strong>写到缓存页。XQA 仍可用原有页表读取它们。"
+    "zh-CN": "算子写出 <strong>BF16 Q 与门控值</strong>，并将 <strong>NVFP4 K/V 与缩放因子</strong>写入分页缓存。XQA 按原有页表与数据布局读取这些输出。"
   },
   "tail.inputNote": {
     "en": "A single task produces O directly. With multiple tasks the last CTA merges their partials. At this point the softmax reduction covers the request's full KV range.",
-    "zh-CN": "只有一个子任务时，它直接算出注意力输出 O。有多个子任务时，最后完成的 CTA 先合并整个请求的局部结果，得到 O。"
+    "zh-CN": "请求只有一个子任务时，该子任务直接生成注意力输出 O；有多个子任务时，由最后完成的 CTA 合并全部局部结果，得到覆盖该请求完整 KV 范围的 O。"
   },
   "tail.fusedNote": {
     "en": "The final writer applies BF16 sigmoid(gate), a BF16 multiply and static FP8 quantization in sequence to produce the projection input.",
-    "zh-CN": "写出 O 的线程接着计算 sigmoid 门控，按 BF16 舍入并相乘，再用固定的缩放因子量化成 FP8，供输出投影直接读取。"
+    "zh-CN": "写出最终结果的线程先计算 sigmoid(gate) 并舍入为 BF16，再与 O 相乘并按 BF16 舍入，随后使用静态缩放因子量化为 FP8，供输出投影读取。"
   },
   "tail.nativeNote": {
     "en": "Attention stores BF16 O. The native compiled epilogue reads it, applies the gate and quantizes to FP8.",
-    "zh-CN": "注意力算子先写出 BF16 的 O。后续算子重新读入 O，乘上门控值，再量化成 FP8。"
+    "zh-CN": "注意力算子先写出 BF16 O。原生编译尾部算子重新读取 O，执行门控与 FP8 量化。"
   },
   "tail.outNote": {
     "en": "The final store writes <strong>E4M3 FP8</strong> directly for the output projection. Partial computation and merging keep their existing formats.",
-    "zh-CN": "<strong>E4M3 格式的 FP8 输出</strong>可直接用于输出投影。各分片仍按原来的精度计算和合并局部结果。"
+    "zh-CN": "最终结果以 <strong>E4M3 FP8 格式</strong>写出，供输出投影直接读取。子任务计算与局部结果归约保留原有的数据格式。"
   },
   "tail.unfusedOut": {
     "en": "The epilogue writes the FP8 tensor consumed by the output projection.",
-    "zh-CN": "后续算子写出 FP8 张量，输出投影再读入它。"
+    "zh-CN": "尾部算子写出 FP8 张量，供输出投影读取。"
   },
   "chart.prefillRow": {
     "en": "<div class=\"bench-row\"><div class=\"bench-row-title\"><span>{0} input tokens / request</span><span class=\"bench-gain\">−{1}%</span></div>{2}{3}</div>",
@@ -617,7 +617,7 @@
   },
   "load.splits": {
     "en": "{0} splits per row",
-    "zh-CN": "每行分 {0} 片"
+    "zh-CN": "每个请求划分为 {0} 片"
   },
   "load.budget": {
     "en": "Target: {0} tiles",
@@ -681,7 +681,7 @@
   },
   "merge.scratch": {
     "en": "Global Scratch",
-    "zh-CN": "暂存局部结果"
+    "zh-CN": "局部结果暂存区"
   },
   "merge.request": {
     "en": "Request R0",
@@ -697,7 +697,7 @@
   },
   "bucket.finalCTA": {
     "en": "Last CTA",
-    "zh-CN": "最后一个 CTA"
+    "zh-CN": "最后完成的 CTA"
   },
   "bucket.kvTiles": {
     "en": "KV Tiles",

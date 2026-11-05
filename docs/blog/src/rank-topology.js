@@ -11,13 +11,13 @@
     if (width < 1) return;
     const narrow = width < 760;
     const local = (en, zh) => document.documentElement.lang.startsWith('zh') ? zh : en;
-    const receiveTitle = local('H2D Stream', '接收流 H2D');
+    const receiveTitle = local('H2D Stream', 'H2D 接收流');
     const computeTitle = local('Compute Stream', '计算流');
-    const sendTitle = local('D2H Stream', '发送流 D2H');
-    const computeBody = local('S1 / S6 · serial local stages', 'S1、S6 交替执行');
+    const sendTitle = local('D2H Stream', 'D2H 发送流');
+    const computeBody = local('S1 / S6 · serial local stages', 'S1 与 S6 串行交错执行');
     const hostTitle = local('Host proxy thread', '主机代理线程');
-    const hostBody = local('Event · READY / ACK', '事件 · READY / ACK');
-    const slotTitle = index => local(`Slot ${index}`, `槽 ${index}`);
+    const hostBody = local('Event · READY / ACK', 'CUDA 事件 · READY / ACK');
+    const slotTitle = index => local(`Slot ${index}`, `缓冲槽 ${index}`);
     const id = `rt-${(host.id || 'rank').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     const family = getComputedStyle(host).fontFamily;
     const measure = (value, size) => {
@@ -71,7 +71,7 @@
     const receiveRow = Math.max(36, 12 + wrap(local('R0 · current input', '槽 0 · 当前输入'), receiveWidth - 40, 14).length * 18);
     const receive = geometry(middle, narrow ? h2d.bottom + 34 : 112, receiveWidth, 64 + receiveRow * 3 + 12);
     const compute = geometry(middle, receive.bottom + 36, receiveWidth, heightFor(computeTitle, computeBody, receiveWidth));
-    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '上一块输出'), sourceWidth - 20));
+    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '较早块的输出'), sourceWidth - 20));
     const source = geometry(right, narrow ? compute.bottom + 36 : 290, sourceWidth, 64 + sourceRow * 2 + 8 + 12);
     const d2h = geometry(right, narrow ? source.bottom + 36 : 146, sourceWidth, heightFor(sendTitle, copy, sourceWidth));
     gpu.h = (narrow ? d2h.bottom : Math.max(source.bottom, compute.bottom)) + 20 - gpu.y;
@@ -111,22 +111,22 @@
     drawing += box(compute.x, compute.y, compute.w, compute.h, 'compute', computeTitle, computeBody, 'rt-stream rt-compute');
     drawing += box(d2h.x, d2h.y, d2h.w, d2h.h, 'd2h', sendTitle, copy, 'rt-stream rt-send');
     drawing += frame(receive.x, receive.y, receive.w, receive.h, 'rt-arena rt-receive');
-    drawing += text(receive.cx, receive.y + 25, local('Receive', '接收缓冲'), receive.w - 20, true);
+    drawing += text(receive.cx, receive.y + 25, local('Receive', '接收缓冲区'), receive.w - 20, true);
     drawing += text(receive.cx, receive.y + 47, local('3 shared slots', '共享 3 个槽'), receive.w - 20);
     [local('R0 · current input', '槽 0 · 当前输入'), local('R1 · prefetch', '槽 1 · 预取输入'), local('R2 · prefetch', '槽 2 · 预取输入')].forEach((label, index) => {
       const y = receive.y + 60 + index * receiveRow;
       drawing += `<g data-rank-slot="receive-${index}">${frame(receive.x + 10, y, receive.w - 20, receiveRow - 5, index ? 'rt-slot rt-receive' : 'rt-slot rt-compute')}${text(receive.cx, y + (receiveRow - 5 - wrap(label, receive.w - 40, 14).length * 18) / 2 + 14, label, receive.w - 40)}</g>`;
     });
     drawing += frame(source.x, source.y, source.w, source.h, 'rt-arena rt-send');
-    drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲'), source.w - 20, true);
+    drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲区'), source.w - 20, true);
     drawing += text(source.cx, source.y + 47, local('2 shared slots', '共享 2 个槽'), source.w - 20);
-    [local('Earlier output', '上一块输出'), local('Current output', '当前输出')].forEach((label, index) => {
+    [local('Earlier output', '较早块的输出'), local('Current output', '当前块的输出')].forEach((label, index) => {
       const y = source.y + 60 + index * (sourceRow + 8);
       drawing += `<g data-rank-slot="source-${index}">${box(source.x + 10, y, source.w - 20, sourceRow, `source-slot-${index}`, slotTitle(index), label, `rt-slot rt-${index ? 'compute' : 'send'}`)}</g>`;
     });
     drawing += box(hostBox.x, hostBox.y, hostBox.w, hostBox.h, 'host-proxy', hostTitle, hostBody, 'rt-host');
-    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 的共享缓冲区和三条 CUDA 流');
-    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 从 GPU0 收到去程输入，从 GPU2 收到回程输入。接收流把数据写入三个共享槽，计算流执行 S1 或 S6，发送流把两个输出槽中的结果发往下一张卡。实线表示数据流向，虚线表示主机控制。三条流可以同时处理不同的块。');
+    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 上的共享缓冲区与三条 CUDA 流');
+    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 的去程输入来自 GPU0，回程输入来自 GPU2。H2D 接收流将输入写入三个共享接收槽，计算流串行执行 S1 与 S6，D2H 发送流从两个共享输出槽读取结果。S1 的输出发往 GPU2，S6 的输出发往 GPU0。实线表示数据依赖，虚线表示主机控制；三条流可重叠处理不同块的数据。');
     const defs = ['receive', 'compute', 'send', 'control'].map(role => `<marker id="${id}-${role}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8 Z" class="rt-arrow rt-${role}"/></marker>`).join('');
     const top = narrow ? 0 : 40;
     const height = Math.max(hostBox.bottom, ...outputs.map(endpoint => endpoint.bottom)) + 16 - top;

@@ -557,6 +557,10 @@ summary > span {
   font-weight: 600;
 }
 
+.title-phrase {
+  display: inline-block;
+}
+
 .hero-accent {
   white-space: nowrap;
   color: var(--accent-strong);
@@ -707,6 +711,10 @@ summary > span {
 
 .intro {
   padding-top: .25rem;
+}
+
+.intro > h2 {
+  margin-bottom: .75rem;
 }
 
 .ref {
@@ -3334,36 +3342,36 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       input: ['x + residual + γ', 'x + residual + γ'],
       value: ['BF16 y · 5120 values', 'BF16 y · 每行 5120 个值'],
       arithmetic: ['Add → RMSNorm', '残差相加 → RMSNorm'],
-      pack: ['group16 → NVFP4', '每 16 个值一组'],
-      shared: ['10 warp partials → warp 0', '10 个 warp 求和，由 warp 0 汇总'],
-      bytes: ['10 KiB / direction / token', '每个 token 读、写各 10 KiB'],
-      output: ['FP4 + scales; BF16 residual', 'FP4 和缩放因子、BF16 残差'],
+      pack: ['group16 → NVFP4', '16 个值 → FP4'],
+      shared: ['10 warp partials → warp 0', '10 个 warp 的局部和 → warp 0'],
+      bytes: ['10 KiB / direction / token', '每个 token 读写各 10 KiB'],
+      output: ['FP4 + scales; BF16 residual', 'FP4 与缩放因子；BF16 残差'],
       next: ['Next: NVFP4 GEMM', '下游：NVFP4 GEMM'],
-      kept: ['BF16 rounding in RF → FP4 packing', '在寄存器内舍入到 BF16，再打包成 FP4'],
+      kept: ['BF16 rounding in RF → FP4 packing', '寄存器内 BF16 舍入 → FP4 打包'],
     },
     front: {
       name: ['QK Norm / RoPE / KV append', 'QK Norm / RoPE / KV 写入'],
-      input: ['QKV projection + γ', 'QKV 投影 + γ'],
+      input: ['QKV projection + γ', 'QKV 投影结果 + γ'],
       value: ['BF16 K · 256 values / head', 'BF16 K · 每头 256 个值'],
       arithmetic: ['QK Norm → RoPE', 'QK Norm → RoPE'],
-      pack: ['group16 → NVFP4', '每 16 个值一组'],
-      shared: ['4 warp partials → warp 0', '4 个 warp 求和，由 warp 0 汇总'],
-      bytes: ['512 B / direction / K head', '每个 K 头读、写各 512 B'],
-      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q 和门控值用 BF16，K/V 用 FP4 加缩放因子'],
+      pack: ['group16 → NVFP4', '16 个值 → FP4'],
+      shared: ['4 warp partials → warp 0', '4 个 warp 的局部和 → warp 0'],
+      bytes: ['512 B / direction / K head', '每个 K 头读写各 512 B'],
+      output: ['Q / gate: BF16; K/V: FP4 + scales', 'Q、门控值：BF16；K/V：FP4 与缩放因子'],
       next: ['Next: paged XQA', '下游：分页 XQA'],
       kept: ['K: Norm → RoPE → pack; V: pack', 'K：Norm → RoPE → 打包；V：直接打包'],
     },
     tail: {
       name: ['Attention output / gate / FP8', '注意力输出 / 门控 / FP8'],
-      input: ['Attention result + gate', '注意力结果和门控值'],
+      input: ['Attention result + gate', '注意力输出与门控值'],
       value: ['BF16 O · 1536 values / rank', 'BF16 O · 每卡 1536 个值'],
       arithmetic: ['Normalize / final merge', '归一化 / 最终合并'],
       pack: ['Gate → E4M3', '门控 → E4M3'],
       shared: ['', ''],
-      bytes: ['3 KiB / direction / token / rank', '每卡每 token 读、写各 3 KiB'],
-      output: ['8 E4M3 values / 8 B store', '一次写出 8 个 E4M3 值（8 B）'],
+      bytes: ['3 KiB / direction / token / rank', '每卡每 token 读写各 3 KiB'],
+      output: ['8 E4M3 values / 8 B store', '每次写出 8 个 E4M3 值（8 B）'],
       next: ['Next: FP8 output projection', '下游：FP8 输出投影'],
-      kept: ['Final writer: BF16 gate → FP8 packing', '合并后做 BF16 门控，再打包成 FP8'],
+      kept: ['Final writer: BF16 gate → FP8 packing', '最终输出：BF16 门控 → FP8 打包'],
     },
   };
   const canvas = document.createElement('canvas');
@@ -3414,7 +3422,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     let drawing = '';
 
     // Layout uses the host's CSS width as SVG units, keeping labels at their CSS size.
-    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终结果 O 和门控值') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
+    const rfValue = kind === 'tail' && fused && phase === 0 ? local('Final O + loaded gate', '最终输出 O 与读入的门控值') : pick(phase === 0 ? operation.input : phase === 1 ? operation.value : operation.output);
     const sm = {x: 8, y: 72, w: compact ? width - 16 : width - 210};
     const part = {x: compact ? 38 : 24, y: compact ? 160 : 174, w: compact ? width - 76 : sm.w - 32};
     const schedulerHeight = 18 + wrap(local('Warp scheduler / dispatch', 'warp 调度与发射'), part.w - 38, 14).length * 18;
@@ -3444,7 +3452,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     memory.y = compact ? sm.y + sm.h + 64 : sm.y + (sm.h - memory.h - 64 - gddr.h) / 2;
     gddr.y = memory.y + memory.h + 64;
     const title = `${pick(operation.name)} · ${local(fused ? 'Fused path' : 'Native path', fused ? '融合路径' : '原生路径')}`;
-    const stages = [local('01 · Load into registers', '01 · 加载到寄存器'), local(fused ? '02 · Compute and pack in SM' : '02 · Materialize BF16, then reload', fused ? '02 · SM 内计算并打包' : '02 · BF16 写出，再读回'), local('03 · Write the consumer format', '03 · 写出下游所需格式')];
+    const stages = [local('01 · Load into registers', '01 · 读取输入至寄存器'), local(fused ? '02 · Compute and pack in SM' : '02 · Materialize BF16, then reload', fused ? '02 · SM 内计算与打包' : '02 · 写出并重新读取 BF16 中间结果'), local('03 · Write the consumer format', '03 · 按下游格式写出结果')];
     drawing += text(8, 18, local('RTX BLACKWELL · ONE SM', 'RTX BLACKWELL · 单个 SM'), width - 16, 'sm-eyebrow');
     drawing += text(8, 42, stages[phase], width - 16, 'sm-phase');
     drawing += rect(sm.x, sm.y, sm.w, sm.h, 'sm-boundary', 8);
@@ -3474,7 +3482,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
       drawing += `<g class="sm-node"${key ? ` data-sm-node="${key}"` : ''}>${node}</g>`;
     };
     drawing += rect(cuda.x, cuda.y, cuda.w, cuda.h, `sm-unit${phase === 1 ? ' is-compute' : ''}`);
-    drawing += text(cuda.cx, cuda.y + 25, compact ? 'CUDA' : local('CUDA lanes', 'CUDA 通道'), cuda.w - 16, 'sm-heading', 'middle');
+    drawing += text(cuda.cx, cuda.y + 25, compact ? 'CUDA' : local('CUDA lanes', 'CUDA 核心'), cuda.w - 16, 'sm-heading', 'middle');
     // Thirty-two FP32 lanes per partition; the tiny matrix below is one Tensor Core.
     for (let lane = 0; lane < 32; lane++) {
       const tile = (cuda.w - 22) / 8;
@@ -3482,9 +3490,9 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     }
     const compactArithmetic = {norm: 'RMSNorm', front: 'Norm / RoPE', tail: local('Final merge', '最终归约')}[kind];
     const arithmetic = compact ? compactArithmetic : pick(operation.arithmetic);
-    const pack = compact && kind !== 'tail' ? local('NVFP4 group16', '每组 16 个值') : pick(operation.pack);
+    const pack = compact && kind !== 'tail' ? local('NVFP4 group16', '16 个值 → FP4') : pick(operation.pack);
     const computeLabel = phase === 0 ? arithmetic : fused || phase === 2 ? pack : arithmetic;
-    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 个通道'), cuda.w - 16, 'sm-small', 'middle');
+    drawing += text(cuda.cx, cuda.y + 89, local('32 lanes', '32 个核心'), cuda.w - 16, 'sm-small', 'middle');
     drawing += text(cuda.cx, cuda.y + 115, computeLabel, cuda.w - 16, 'sm-small', 'middle');
     drawing += rect(tensor.x, tensor.y, tensor.w, tensor.h, 'sm-unit');
     drawing += text(tensor.cx, tensor.y + 25, 'Tensor Core', tensor.w - 16, 'sm-heading', 'middle');
@@ -3495,7 +3503,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     drawing += text(tensor.cx, tensor.y + 113, local('5th gen · MMA', '第五代 · MMA'), tensor.w - 16, 'sm-small', 'middle');
     cell(sfu, 'SFU', local('Reciprocal / exp', '倒数 / 指数'), '', 'sfu');
     const loadStoreState = phase === 1 && fused && kind === 'tail' ? '' : `is-${phase === 0 ? 'load' : phase === 2 ? 'output' : fused ? 'compute' : 'native'}`;
-    cell(ldst, 'LD/ST', local('Global / shared', '全局 / 共享'), loadStoreState, 'ldst');
+    cell(ldst, 'LD/ST', local('Global / shared', '全局 / 共享内存'), loadStoreState, 'ldst');
 
     cell({...shared, cx:shared.x + shared.w / 2}, sharedTitle, sharedBody, `sm-shared${fused && phase === 1 && kind !== 'tail' ? ' is-current' : ''}`);
 
@@ -3532,9 +3540,9 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     if (phase === 1 && !fused) drawing += route(`M${center - 6} ${gddr.y} V${memory.y + memory.h}`, 'native', false, 'is-conditional');
     drawing += text(center + 10, memory.y + memory.h + 26, local('Miss / eviction', '未命中 / 驱逐'), memory.w / 2 - 14, 'sm-small');
 
-    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', '门控值从 L2 读入寄存器，最终结果 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出 + 读回')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
+    const caption = phase === 0 ? kind === 'tail' && fused ? local('Gate: L2 → LD/ST → RF; final O is already on chip', '门控值经 L2 与 LD/ST 读入寄存器；最终输出 O 已在片上') : local('Inputs → L2 → LD/ST → RF', '输入 → L2 → LD/ST → RF') : phase === 1 ? fused ? pick(operation.kept) : `${pick(operation.bytes)} · ${local('BF16 store + reload', 'BF16 写出与重读')}` : `${pick(operation.output)} · ${pick(operation.next)}`;
     const footerY = Math.max(sm.y + sm.h, gddr.y + gddr.h) + 30;
-    const legend = [['load', local('Input load', '输入加载')], ['native', local('BF16 round trip', 'BF16 往返')], ['fused', local('RF packing', 'RF 内打包')], ['output', local('Output store', '写出结果')]];
+    const legend = [['load', local('Input load', '读取输入')], ['native', local('BF16 round trip', 'BF16 写出与重读')], ['fused', local('RF packing', '寄存器内打包')], ['output', local('Output store', '写出结果')]];
     const columns = compact ? 2 : 4;
     const legendRowHeight = compact ? 42 : 24;
     legend.forEach(([color, label], index) => {
@@ -3545,7 +3553,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     });
     const height = footerY + (compact ? legendRowHeight * 2 : legendRowHeight);
     const defs = ['load', 'native', 'fused', 'output'].map(color => `<marker id="${id}-${color}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" class="sm-arrow-${color}"/></marker>`).join('');
-    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '图中展开了四个执行分区（SMSP）中的一个。CUDA 执行单元负责打包，线程可通过共享内存交换数据。L2 未命中或需要写回时才会访问 GDDR7。')} ${caption}`;
+    const description = `${stages[phase]}. ${local('Four SMSPs; one expanded. Packing uses CUDA lanes. L1/shared is a separate cooperation path. GDDR7 traffic is conditional on L2 misses or evictions.', '图中展开单个 SM 的四个执行分区（SMSP）之一。CUDA 核心执行量化打包，共享内存提供 warp 间的数据交换路径。全局内存读写经由 LD/ST 与 L2，L2 未命中或缓存写回时访问 GDDR7。')} ${caption}`;
     host.innerHTML = `<svg class="sm-svg" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="${id}-title ${id}-desc" xmlns="http://www.w3.org/2000/svg"><title id="${id}-title">${escape(title)}</title><desc id="${id}-desc">${escape(description)}</desc><defs>${defs}</defs>${drawing}</svg>`;
   };
 })();
@@ -3563,13 +3571,13 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     if (width < 1) return;
     const narrow = width < 760;
     const local = (en, zh) => document.documentElement.lang.startsWith('zh') ? zh : en;
-    const receiveTitle = local('H2D Stream', '接收流 H2D');
+    const receiveTitle = local('H2D Stream', 'H2D 接收流');
     const computeTitle = local('Compute Stream', '计算流');
-    const sendTitle = local('D2H Stream', '发送流 D2H');
-    const computeBody = local('S1 / S6 · serial local stages', 'S1、S6 交替执行');
+    const sendTitle = local('D2H Stream', 'D2H 发送流');
+    const computeBody = local('S1 / S6 · serial local stages', 'S1 与 S6 串行交错执行');
     const hostTitle = local('Host proxy thread', '主机代理线程');
-    const hostBody = local('Event · READY / ACK', '事件 · READY / ACK');
-    const slotTitle = index => local(`Slot ${index}`, `槽 ${index}`);
+    const hostBody = local('Event · READY / ACK', 'CUDA 事件 · READY / ACK');
+    const slotTitle = index => local(`Slot ${index}`, `缓冲槽 ${index}`);
     const id = `rt-${(host.id || 'rank').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     const family = getComputedStyle(host).fontFamily;
     const measure = (value, size) => {
@@ -3623,7 +3631,7 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     const receiveRow = Math.max(36, 12 + wrap(local('R0 · current input', '槽 0 · 当前输入'), receiveWidth - 40, 14).length * 18);
     const receive = geometry(middle, narrow ? h2d.bottom + 34 : 112, receiveWidth, 64 + receiveRow * 3 + 12);
     const compute = geometry(middle, receive.bottom + 36, receiveWidth, heightFor(computeTitle, computeBody, receiveWidth));
-    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '上一块输出'), sourceWidth - 20));
+    const sourceRow = Math.max(58, heightFor(slotTitle(0), local('Earlier output', '较早块的输出'), sourceWidth - 20));
     const source = geometry(right, narrow ? compute.bottom + 36 : 290, sourceWidth, 64 + sourceRow * 2 + 8 + 12);
     const d2h = geometry(right, narrow ? source.bottom + 36 : 146, sourceWidth, heightFor(sendTitle, copy, sourceWidth));
     gpu.h = (narrow ? d2h.bottom : Math.max(source.bottom, compute.bottom)) + 20 - gpu.y;
@@ -3663,22 +3671,22 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
     drawing += box(compute.x, compute.y, compute.w, compute.h, 'compute', computeTitle, computeBody, 'rt-stream rt-compute');
     drawing += box(d2h.x, d2h.y, d2h.w, d2h.h, 'd2h', sendTitle, copy, 'rt-stream rt-send');
     drawing += frame(receive.x, receive.y, receive.w, receive.h, 'rt-arena rt-receive');
-    drawing += text(receive.cx, receive.y + 25, local('Receive', '接收缓冲'), receive.w - 20, true);
+    drawing += text(receive.cx, receive.y + 25, local('Receive', '接收缓冲区'), receive.w - 20, true);
     drawing += text(receive.cx, receive.y + 47, local('3 shared slots', '共享 3 个槽'), receive.w - 20);
     [local('R0 · current input', '槽 0 · 当前输入'), local('R1 · prefetch', '槽 1 · 预取输入'), local('R2 · prefetch', '槽 2 · 预取输入')].forEach((label, index) => {
       const y = receive.y + 60 + index * receiveRow;
       drawing += `<g data-rank-slot="receive-${index}">${frame(receive.x + 10, y, receive.w - 20, receiveRow - 5, index ? 'rt-slot rt-receive' : 'rt-slot rt-compute')}${text(receive.cx, y + (receiveRow - 5 - wrap(label, receive.w - 40, 14).length * 18) / 2 + 14, label, receive.w - 40)}</g>`;
     });
     drawing += frame(source.x, source.y, source.w, source.h, 'rt-arena rt-send');
-    drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲'), source.w - 20, true);
+    drawing += text(source.cx, source.y + 25, local('Source', '输出缓冲区'), source.w - 20, true);
     drawing += text(source.cx, source.y + 47, local('2 shared slots', '共享 2 个槽'), source.w - 20);
-    [local('Earlier output', '上一块输出'), local('Current output', '当前输出')].forEach((label, index) => {
+    [local('Earlier output', '较早块的输出'), local('Current output', '当前块的输出')].forEach((label, index) => {
       const y = source.y + 60 + index * (sourceRow + 8);
       drawing += `<g data-rank-slot="source-${index}">${box(source.x + 10, y, source.w - 20, sourceRow, `source-slot-${index}`, slotTitle(index), label, `rt-slot rt-${index ? 'compute' : 'send'}`)}</g>`;
     });
     drawing += box(hostBox.x, hostBox.y, hostBox.w, hostBox.h, 'host-proxy', hostTitle, hostBody, 'rt-host');
-    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 的共享缓冲区和三条 CUDA 流');
-    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 从 GPU0 收到去程输入，从 GPU2 收到回程输入。接收流把数据写入三个共享槽，计算流执行 S1 或 S6，发送流把两个输出槽中的结果发往下一张卡。实线表示数据流向，虚线表示主机控制。三条流可以同时处理不同的块。');
+    const title = local('GPU1 rank topology: shared buffers and three concurrent CUDA streams', 'GPU1 上的共享缓冲区与三条 CUDA 流');
+    const description = local('Forward input arrives from GPU0; return input arrives from GPU2. H2D fills three shared receive slots, Compute executes S1 or S6, and two source slots feed D2H toward GPU2 or GPU0. Solid links show data dependencies, while dashed links connect host control. The three streams can overlap work on different chunks.', 'GPU1 的去程输入来自 GPU0，回程输入来自 GPU2。H2D 接收流将输入写入三个共享接收槽，计算流串行执行 S1 与 S6，D2H 发送流从两个共享输出槽读取结果。S1 的输出发往 GPU2，S6 的输出发往 GPU0。实线表示数据依赖，虚线表示主机控制；三条流可重叠处理不同块的数据。');
     const defs = ['receive', 'compute', 'send', 'control'].map(role => `<marker id="${id}-${role}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L8 4 L0 8 Z" class="rt-arrow rt-${role}"/></marker>`).join('');
     const top = narrow ? 0 : 40;
     const height = Math.max(hostBox.bottom, ...outputs.map(endpoint => endpoint.bottom)) + 16 - top;

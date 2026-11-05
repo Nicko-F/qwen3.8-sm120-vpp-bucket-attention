@@ -10,8 +10,8 @@ BENCHMARKS = ROOT.parents[1] / "benchmarks"
 PAGES = {
     "en": ("index.html", "content.en.html", "Accelerating Qwen3.8 27B Inference on SM120",
            "Interactive diagrams of folded VPP prefill, KV-length-aware decode and three CUDA kernel fusions on four RTX 5090 GPUs."),
-    "zh-CN": ("zh-CN.html", "content.html", "千问3.8 27B 在 SM120 上的推理优化",
-              "在四张 RTX 5090 上跑千问3.8 27B：预填充如何减少流水线等待，解码如何分摊长请求的 KV，以及三处 CUDA 算子融合能省下多少读写。"),
+    "zh-CN": ("zh-CN.html", "content.html", "四张 RTX 5090 跑千问3.8 27B：从流水线调度到算子融合",
+              "四张 RTX 5090 上的千问3.8 27B 推理实测：折返流水线缩短长输入的预填充时间，KV 分桶均衡混合长度请求的解码负载，三个 CUDA 融合算子减少中间张量读写。"),
 }
 
 

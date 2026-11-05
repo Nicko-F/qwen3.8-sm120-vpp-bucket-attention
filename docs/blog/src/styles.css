@@ -541,6 +541,10 @@ summary > span {
   font-weight: 600;
 }
 
+.title-phrase {
+  display: inline-block;
+}
+
 .hero-accent {
   white-space: nowrap;
   color: var(--accent-strong);
@@ -691,6 +695,10 @@ summary > span {
 
 .intro {
   padding-top: .25rem;
+}
+
+.intro > h2 {
+  margin-bottom: .75rem;
 }
 
 .ref {
