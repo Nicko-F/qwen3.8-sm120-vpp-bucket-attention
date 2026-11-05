@@ -1,7 +1,8 @@
 # Results
 
-The subsequent [VPP resource refactor](vpp-resources.md#matched-model-checks)
-has its own two-capacity comparison and allocation/credit records. It retains
+The default public VPP implementation is now the
+[rank-shared resource path](vpp-resources.md#long-context-measurements). It has
+separate 8K/32K/64K/128K allocation, credit and bank-latency records. It retains
 the stage order and is separate from the historical performance tables below.
 
 These tables summarize completed research runs before extraction into this

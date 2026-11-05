@@ -37,6 +37,15 @@ Keep bounded queue ownership, buffer lifetime and required capability checks.
 The current folded adapter has a genuine, documented model/parallelism contract;
 packaging does not imply support for arbitrary models or asynchronous decode.
 
+The maintained public VPP path is the rank-shared segmented-DMA implementation.
+It allocates two source and three receive slots once per rank, shares one stream
+per copy direction across both traversals, and preserves W=7 and stage order.
+The edge-owned layout is an explicit diagnostic control. Source and installed
+model checks for the current implementation are recorded in
+[the resource report](vpp-resources.md), including the 64K/128K latency and
+memory comparisons. The original full prefill curves retain their historical
+measurement scope.
+
 Fusion is opt-in. Preserve residual precision, native quantization scales and
 consumer layout. Normal compiler cache identities are legitimate; exact-source
 hash access gates are not. The small HTTP fusion differences do not establish

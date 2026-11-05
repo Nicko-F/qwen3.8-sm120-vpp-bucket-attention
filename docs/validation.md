@@ -3,6 +3,14 @@
 This record validates extraction and installation separately from the historical
 [performance results](results.md). No new performance gain is claimed here.
 
+The current public VPP path is rank-shared segmented DMA (`resource_layout=rank`).
+Its kernel implementation is `8161a2d`, followed by benchmark/documentation
+changes. It passed a 120-boundary transport check and installed-model checks at
+4x8K, 4x32K, 4x64K and 4x128K, with drained ownership and task-owned cleanup.
+See [current VPP results](vpp-resources.md#long-context-measurements). The
+extraction-smoke records below are retained as historical validation of the
+earlier package; they are not the revision selected as today's default.
+
 | Check | Outcome |
 | --- | --- |
 | Local CPU suite | 30 passed; three opt-in GPU cases and two Linux-only cases skipped on Windows. |

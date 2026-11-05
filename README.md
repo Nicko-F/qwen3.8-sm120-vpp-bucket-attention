@@ -58,14 +58,23 @@ Omit `--with-toolkit` when a compatible CUDA toolkit is already available.
 .venv/bin/qwen-infra serve --model /path/to/model --profile decode-fused \
   --tensor-parallel-size 4
 
-# Run a P+1 prefill bank with four folded VPP ranks.
+# Run the current rank-shared VPP implementation on four ranks.
 .venv/bin/qwen-infra prefill --model /path/to/Qwen-NVFP4 --profile vpp \
-  --chunk-size 2048 --prompt-tokens 8192 --requests 1
+  --resource-layout rank --chunk-size 2048 --prompt-tokens 8192 --requests 4
 ```
 
 Native vLLM arguments remain available. Use `--dry-run` to inspect the resolved
 launch before allocating a model. No historical run, source hash, private
 directory or author-specific environment is required.
+
+The default segmented-DMA VPP path uses `--resource-layout rank`: each rank
+preallocates **two source slots and three receive slots**, with one main compute
+stream and one stream per copy direction. Both traversals share this storage;
+slot ownership changes without per-chunk communication-buffer allocation.
+W=7 and the virtual-stage order are preserved. The `edge` layout is an explicit
+diagnostic control. At C8192, the current layout uses **800 MiB/rank** and saves
+**3.594 GiB on each middle rank**. Four-request 64K and 128K checks were near
+latency parity with that control; see [current VPP validation](docs/vpp-resources.md#long-context-measurements).
 
 ## Measured results
 
@@ -75,15 +84,18 @@ must not be added together.
 
 | Scope | Observation |
 | --- | --- |
-| Static prefill, four requests | Best VPP configurations reduced bank latency by **4.47–8.55%** against the best measured CPP configurations over 8K–128K inputs. |
+| Current VPP resources, four requests | Middle-rank communication payload falls from **4480 to 800 MiB** at C8192; 64K/128K bank latency changed **+0.12% / +0.03%**, with overlapping ranges. |
+| Historical static prefill, four requests | Best VPP configurations reduced bank latency by **4.47–8.55%** against the best measured CPP configurations over 8K–128K inputs, before the shared-buffer refactor. |
 | Full-model decode, severe KV skew | Bucket routing reduced measured step latency by **28.28% / 36.55%** in the declared B9 / B32 windows. |
 | Finite mixed HTTP banks | Bucket attention improved output throughput by about **10–11%** in the measured mixed-arrival banks; uniform throughput was near parity. |
 | Fusion, controlled GPU calls | All three fusions reduced latency by **2.04–7.18%** against the same bucket path over the tested 1K/2K contexts and batch sizes. |
 | Fusion, HTTP | Additional throughput changes ranged from **−1.46% to +1.76%**; there is no universal serving gain. |
 
 See [results and limitations](docs/results.md) for baselines, absolute timings,
-negative results and measurement boundaries. These are historical measurements,
-not a claim that every fresh installation has been benchmarked.
+negative results and measurement boundaries. The resource row describes the
+current VPP implementation. The remaining figures retain their original research
+settings. Focused checks cover the new layout at 8K–128K; the original full-matrix
+tables document the earlier resource layout.
 
 ## Project layout
 

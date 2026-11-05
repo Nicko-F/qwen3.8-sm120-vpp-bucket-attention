@@ -41,28 +41,36 @@ bash scripts/bootstrap.sh --with-toolkit -- serve \
 .venv/bin/qwen-infra serve --model /path/to/model \
   --profile decode-fused --tensor-parallel-size 4
 
-# 四卡 VPP，执行 Prefill 并生成一个 token
+# 当前共享资源实现：四卡 VPP，每请求生成一个 token
 .venv/bin/qwen-infra prefill --model /path/to/Qwen-NVFP4 \
-  --profile vpp --chunk-size 2048 --prompt-tokens 8192 --requests 1
+  --profile vpp --resource-layout rank \
+  --chunk-size 2048 --prompt-tokens 8192 --requests 4
 ```
 
 加上 `--dry-run` 可以先查看启动配置。服务请求、调度和 OpenAI 兼容 API 仍由
 vLLM 负责。VPP 当前是明确受支持形状的 P+1 路径；算子支持范围见安装文档，
 不把某一台实验机的配置当作所有机器的要求。
 
+当前 VPP 的分段 DMA 路径默认使用 `--resource-layout rank`：每个 Rank 启动时固定分配
+**2 个 Source Slot＋3 个 Receive Slot**，两次遍历共享一条主计算流、一条 D2H
+流和一条 H2D 流。运行时借还 Slot，保留 W=7 与原虚拟 Stage 顺序。`edge` 仅作
+显式对照选项。C8192 下通信缓冲为 **800 MiB/Rank**，中间 Rank 每卡节省
+**3.594 GiB**；4×64K 和 4×128K 的完整 Bank 速度基本持平，见[当前 VPP 验证](docs/vpp-resources.md#long-context-measurements)。
+
 ## 已有收益
 
 | 层级 | 已完成实验的观察 |
 | --- | --- |
-| Prefill | B4、8K–128K，最佳已测 VPP 对最佳 CPP 的完整 bank 延迟降低 **4.47–8.55%**。 |
+| 当前 VPP 资源 | C8192 中间 Rank 通信缓冲 **4480→800 MiB**；64K/128K 完整 Bank 耗时变化 **+0.12% / +0.03%**，测量区间重叠。 |
+| 历史 Prefill | 共享缓冲改造前的 B4、8K–128K，最佳已测 VPP 对最佳 CPP 的完整 bank 延迟降低 **4.47–8.55%**。 |
 | Decode | 严重 KV 不均衡的 B9/B32 完整模型窗口，步延迟降低 **28.28% / 36.55%**。 |
 | HTTP | 有限混合负载 bank 的 Bucket 输出吞吐提高约 **10–11%**；均匀负载接近持平。 |
 | 融合 | 受控 1K/2K、B1/8/16/32 GPU 调用，相对同一 Bucket 路径降低 **2.04–7.18%**。 |
 | 融合接入 HTTP | 额外吞吐变化 **−1.46% 至 +1.76%**，尚无普遍服务收益。 |
 
-这些数字来自整理前完成的研究实验。新包的安装与 smoke 验证另行记录，不能混作
-重新跑过完整性能曲线。各层的分母不同，收益不能直接相加。完整口径、负结果和
-适用范围见[实验结果](docs/results.md)。
+当前资源行来自新实现的实测，其余性能数字保留原研究实验口径。本轮只补了必要
+资源与完整 Bank 对照，没有重跑整套曲线。各层的分母不同，收益不能直接相加。
+完整口径、负结果和适用范围见[实验结果](docs/results.md)。
 
 ## 仓库内容
 
