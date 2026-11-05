@@ -1057,7 +1057,7 @@ summary > span {
 }
 
 /* A rank-local snapshot shares one time marker across three independent streams. */
-#rank-figure [hidden] { display: none; }
+#vpp-topology [hidden] { display: none; }
 
 .rank-snapshot {
   margin-block: 8px 18px;
@@ -3123,8 +3123,8 @@ tbody tr:hover {
 
     <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: connecting compute and communication within a rank</strong><small>Shared buffers · CUDA streams · Segmented DMA · vLLM integration</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
       <div class="prose"><h3>How two virtual stages share one GPU</h3><p>GPU1 runs stages S1 and S6 in turn on one compute stream. For each chunk, the stage waits for its input to arrive. As each output becomes ready, the send stream can start copying it. The two copy streams can also work on other chunks while the compute stream runs. The solid arrows in the topology show where data moves. The dashed lines connect the host proxy thread to the streams it coordinates.<a class="ref" href="#ref-9">[9]</a></p></div>
-      <figure class="data-figure nested" id="rank-figure">
-        <div class="figure-header"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>GPU1 can receive, compute and send in parallel</h4></div><div id="rank-views" class="segmented" role="group" aria-label="Choose a view of GPU1" hidden><button aria-controls="rank-topology" aria-pressed="true">Topology</button><button aria-controls="rank-diagram" aria-pressed="false">Parallel snapshot</button></div></div>
+      <figure class="data-figure nested" id="vpp-topology">
+        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>GPU1 can receive, compute and send in parallel</h4></div><div id="rank-views" class="segmented" role="group" aria-label="Choose a view of GPU1" hidden><button aria-controls="rank-topology" aria-pressed="true">Topology</button><button aria-controls="rank-diagram" aria-pressed="false">Parallel snapshot</button></div></div>
         <div id="rank-topology" hidden></div>
         <div id="rank-diagram" class="rank-snapshot" role="group" aria-label="Three CUDA streams handle different chunks at the same instant">
           <div class="rank-time-label"><span>GPU1 streams</span><span>Snapshot at time t ↓</span></div>

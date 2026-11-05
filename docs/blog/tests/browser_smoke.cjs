@@ -96,7 +96,7 @@ function readingGeometry() {
     if (bounds.left < main.left - 1 || bounds.right > main.right + 1) mismatches.push(element.textContent.slice(0, 35));
   }
   // A slot label can cross its own border even when the article fits the window.
-  for (const slot of document.querySelectorAll('#rank-figure .rank-slot')) {
+  for (const slot of document.querySelectorAll('#vpp-topology .rank-slot')) {
     const box = rect(slot);
     const range = document.createRange();
     range.selectNodeContents(slot);
@@ -131,7 +131,7 @@ async function checkPage(browser, file, lang, otherPage) {
     assert.equal(await page.locator('.reference-list li').count(), 16);
     await page.evaluate(checkModels);
     await page.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
-    const rank = page.locator('#rank-figure');
+    const rank = page.locator('#vpp-topology');
     const topology = rank.locator('button[aria-controls="rank-topology"]');
     const snapshot = rank.locator('button[aria-controls="rank-diagram"]');
     assert.equal(await topology.getAttribute('aria-pressed'), 'true');

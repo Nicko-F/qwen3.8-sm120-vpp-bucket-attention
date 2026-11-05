@@ -75,8 +75,8 @@
 
     <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>展开实现：一个 Rank 的计算与通信如何衔接</strong><small>共享缓冲 · CUDA Stream · 分段 DMA · vLLM 接入</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
       <div class="prose"><h3>两个虚拟阶段如何共用一张 GPU</h3><p>GPU1 上的 S1 和 S6 在同一条计算流上交替执行。对同一个块，计算要等输入到齐，发送要等相应的输出就绪。对不同的块，接收流和发送流都可以在计算流工作时搬运数据。拓扑图中的实线箭头表示数据流向，虚线表示主机代理线程与各条流的控制关系。<a class="ref" href="#ref-9">[9]</a></p></div>
-      <figure class="data-figure nested" id="rank-figure">
-        <div class="figure-header"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>GPU1 上的接收、计算和发送可以并行</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">并行快照</button></div></div>
+      <figure class="data-figure nested" id="vpp-topology">
+        <div class="figure-header" id="rank-figure"><div><div class="figure-kicker">FIG. 03 / RANK 1</div><h4>GPU1 上的接收、计算和发送可以并行</h4></div><div id="rank-views" class="segmented" role="group" aria-label="选择 GPU1 视图" hidden><button aria-controls="rank-topology" aria-pressed="true">拓扑图</button><button aria-controls="rank-diagram" aria-pressed="false">并行快照</button></div></div>
         <div id="rank-topology" hidden></div>
         <div id="rank-diagram" class="rank-snapshot" role="group" aria-label="三条 CUDA Stream 在同一时刻处理不同 Chunk">
           <div class="rank-time-label"><span>GPU1 的三条流</span><span>时刻 t ↓</span></div>

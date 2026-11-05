@@ -1041,7 +1041,7 @@ summary > span {
 }
 
 /* A rank-local snapshot shares one time marker across three independent streams. */
-#rank-figure [hidden] { display: none; }
+#vpp-topology [hidden] { display: none; }
 
 .rank-snapshot {
   margin-block: 8px 18px;
