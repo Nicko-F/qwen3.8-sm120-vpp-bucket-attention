@@ -50,6 +50,37 @@ async function stepThrough(page, selector) {
   }
 }
 
+function readingGeometry() {
+  const rect = element => element.getBoundingClientRect();
+  const main = rect(document.querySelector('main'));
+  const mismatches = [];
+  const columns = document.querySelectorAll(
+    'main > section, .chapter-heading, .chapter > .prose, .chapter figure, .deep-dive, .details-body > .prose'
+  );
+  for (const element of columns) {
+    const box = rect(element);
+    if (!box.width) continue;
+    if (Math.abs(box.left - main.left) > 2 || Math.abs(box.right - main.right) > 2) {
+      mismatches.push(element.id || element.className);
+    }
+  }
+  for (const element of document.querySelectorAll('.chapter-heading h2, .chapter .prose > h3, .chapter figcaption, .figure-header h4')) {
+    if (!element.getClientRects().length) continue;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const firstLine = range.getClientRects()[0];
+    if (firstLine && Math.abs(firstLine.left - main.left) > 2) mismatches.push(element.textContent.slice(0, 30));
+  }
+  const chart = document.querySelector('#load-chart');
+  const rail = rect(document.querySelector('#toc'));
+  return {
+    mismatches,
+    chartOverflow: chart.scrollWidth - chart.clientWidth,
+    bodyOverflow: document.documentElement.scrollWidth - innerWidth,
+    railOutside: !rail.width || rail.left >= main.right,
+  };
+}
+
 async function checkPage(browser, file, lang, otherPage) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   const errors = [];
@@ -89,13 +120,26 @@ async function checkPage(browser, file, lang, otherPage) {
     const initialTheme = await page.locator('html').getAttribute('data-theme');
     await page.locator('#theme-toggle').click();
     assert.notEqual(await page.locator('html').getAttribute('data-theme'), initialTheme);
-    for (const width of [320, 360, 390, 650, 768, 981, 1024, 1440, 1920]) {
+    for (const width of [320, 390, 650, 768, 1024, 1120, 1440, 1850, 1920]) {
       await page.setViewportSize({ width, height: 900 });
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), file + ' overflow at ' + width);
+      const geometry = await page.evaluate(readingGeometry);
+      const context = file + ' at ' + width + 'px';
+      assert.deepEqual(geometry.mismatches, [], context + ' reading column');
+      assert.ok(geometry.bodyOverflow <= 1, context + ' page overflow');
+      assert.ok(geometry.chartOverflow <= 1, context + ' CTA chart overflow');
+      assert.ok(geometry.railOutside, context + ' contents overlap');
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#menu-toggle').click();
     assert.equal(await page.locator('#menu-toggle').getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#article').evaluate(element => element.inert), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#menu-toggle').evaluate(element => element === document.activeElement), true);
+    await page.locator('#menu-toggle').click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForFunction(() => !document.getElementById('article').inert);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#menu-toggle').click();
     await page.locator('#toc a[href="#decode"]').click();
     assert.equal(await page.locator('#menu-toggle').getAttribute('aria-expanded'), 'false');
     await page.locator('#language-switch').click();

@@ -38,7 +38,7 @@ def main():
 <html lang="{lang}" data-theme="light">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#ffffff">
 <title>{title}</title><meta name="description" content="{description}">
 {alternates}
 <script>try{{document.documentElement.dataset.theme=localStorage.getItem('qwen-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}}catch(e){{}}</script>

@@ -2,121 +2,2717 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#faf9f6">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#ffffff">
 <title>Qwen3.8 27B | From pipeline scheduling to CUDA kernel fusion</title><meta name="description" content="Interactive diagrams of folded VPP prefill, KV-length-aware decode and three CUDA kernel fusions on four RTX 5090 GPUs.">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="zh-CN" href="zh-CN.html">
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('qwen-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){}</script>
-<style>:root{--bg:#faf9f6;--panel:#fff;--panel-2:#f3f4f1;--ink:#1e2d38;--ink-2:#425461;--muted:#6d7a83;--border:#dce2df;--accent:#087f79;--accent-strong:#00675f;--accent-soft:#e4f4ef;--blue:#4878c9;--blue-soft:#eaf0fc;--purple:#8962ba;--orange:#c97a39;--ring:#e9bf82;--shadow:0 8px 28px rgba(28,48,43,.035);--code-bg:#14202c;--trace-bg:#15212f;--trace-grid:#2c3a4b;--trace-ink:#b8c9d6;--req0:#4e86ce;--req1:#d69749;--req2:#8d74c4;--req3:#3fa495;--sans:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;--mono:'SFMono-Regular',Consolas,'Liberation Mono',monospace;--math:'Cambria Math','STIX Two Math',Georgia,'Times New Roman',serif}
-:root[data-theme=dark]{--bg:#11181f;--panel:#17222b;--panel-2:#1c2a34;--ink:#e1e9ec;--ink-2:#b6c5ce;--muted:#879da9;--border:#30414a;--accent:#62cabc;--accent-strong:#83dfd1;--accent-soft:#1e3738;--blue:#85ade7;--blue-soft:#213449;--purple:#b699dd;--orange:#dfaa70;--ring:#a8793c;--shadow:none;--code-bg:#0c141c;--trace-bg:#0d1722;--trace-grid:#233343;--trace-ink:#a3bacb;--req0:#6499df;--req1:#d8a262;--req2:#a48dd6;--req3:#65b7a7}
-*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:100px}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.8;-webkit-font-smoothing:antialiased}button,select,input{font:inherit}button,a,select{-webkit-tap-highlight-color:transparent}a{color:var(--accent-strong);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:4px}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,a:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:5px}h1,h2,h3,h4{color:var(--ink);line-height:1.35;margin:0;font-weight:700}h2{font-size:34px;letter-spacing:-.8px}h3{font-size:24px;letter-spacing:-.3px;margin:36px 0 16px}h4{font-size:18px;margin:24px 0 10px}p{margin:0 0 18px}small{font-size:12px}strong{font-weight:650}code{font-family:var(--mono);font-size:.86em;word-break:break-word;padding:2px 5px;border-radius:4px;color:var(--accent-strong);background:var(--accent-soft)}pre{white-space:pre;overflow-x:auto;tab-size:4;margin:0}pre code{display:block;word-break:normal;padding:18px 22px;background:none;color:#d5e4ed;font-size:13px;line-height:1.85}i:not(.key){font-style:italic}sub,sup{font-size:72%;line-height:0}figure{margin:28px 0 36px}figcaption{font-size:12px;line-height:1.8;color:var(--muted);padding:14px 22px 17px;border-top:1px solid var(--border)}.muted{color:var(--muted)}.dot{width:7px;height:7px;border-radius:100%;display:inline-block;background:var(--accent);flex:none}.reading-progress{height:3px;position:fixed;left:0;right:0;top:0;z-index:100;background:transparent}.reading-progress span{height:100%;width:0;display:block;background:var(--accent)}.skip-link{position:fixed;top:-100px;left:20px;z-index:110;background:var(--panel);padding:10px}.skip-link:focus{top:10px}.site-header{height:72px;position:fixed;left:0;top:0;right:0;z-index:90;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:0 max(28px,calc((100vw - 1520px)/2 + 28px))}.wordmark{display:flex;gap:10px;align-items:center;font-size:13px;letter-spacing:1.4px;color:var(--ink);font-weight:750}.wordmark:hover{text-decoration:none}.brand-mark{display:grid;place-items:center;width:28px;height:28px;background:var(--ink);color:var(--bg);border-radius:7px;font-size:16px;letter-spacing:0}.wordmark-divider{color:var(--border);padding:0 4px}.wordmark-sub{color:var(--muted);font-size:11px;font-weight:550}.header-actions{display:flex;align-items:center;gap:21px}.header-link{color:var(--ink-2);font-size:13px;font-weight:600}.icon-button{border:1px solid var(--border);border-radius:8px;width:34px;height:34px;background:var(--panel);color:var(--ink);display:grid;place-items:center;padding:0;line-height:1;font-size:18px}.mobile-menu{display:none}.toc{position:fixed;top:106px;bottom:30px;width:220px;left:max(28px,calc((100vw - 1520px)/2 + 28px));display:flex;flex-direction:column;z-index:50}.toc-heading{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:10px;font-weight:650;letter-spacing:1.5px;margin:0 0 18px;padding:0 16px 0 11px}.toc-heading span{font-family:var(--mono);font-size:11px;letter-spacing:0;color:var(--accent)}.toc nav{overflow:auto;scrollbar-width:thin;padding:0 8px 20px 0}.toc nav a{display:block;border-left:2px solid transparent;border-radius:0 5px 5px 0;font-size:12px;color:var(--muted);line-height:1.5;padding:6px 8px 6px 12px;margin-bottom:2px}.toc nav a:hover{text-decoration:none;color:var(--ink);background:var(--panel-2)}.toc nav a.active{color:var(--accent-strong);border-left-color:var(--accent);background:var(--accent-soft)}.toc nav .toc-main{font-weight:600;color:var(--ink-2);margin:8px 0}.toc nav .toc-chapter{font-weight:700;color:var(--ink-2);margin-top:14px;padding-top:7px;padding-bottom:7px}.toc-chapter span{font-size:10px;font-family:var(--mono);color:var(--accent);margin-right:7px}.toc nav .toc-sub{padding-left:32px;font-size:11px}.toc-bottom{margin-top:auto;font-size:11px;padding:14px 11px 0;border-top:1px solid var(--border);color:var(--ink-2);line-height:1.9}.toc-bottom .dot{width:5px;height:5px;margin-right:6px}.toc-bottom .muted{font-size:10px}.toc-scrim{display:none}main{max-width:1120px;margin:0 auto;padding:128px 34px 0;margin-left:max(268px,calc((100vw - 1520px)/2 + 268px));margin-right:max(0px,calc((100vw - 1520px)/2));}.hero{padding:10px 0 42px}.eyebrow{font-family:var(--mono);letter-spacing:1.7px;font-weight:500;font-size:10px;display:flex;align-items:center;gap:10px;color:var(--muted);margin-bottom:22px}.eyebrow-line{display:inline-block;width:40px;height:1px;background:var(--border)}.hero h1{font-size:clamp(44px,4.5vw,68px);letter-spacing:-2.4px;line-height:1.12;font-weight:780}.hero-accent{color:var(--accent-strong)}.hero-subtitle{font-size:25px;line-height:1.5;letter-spacing:.2px;font-weight:500;margin:22px 0;color:var(--ink)}.hero-deck{max-width:780px;font-size:17px;line-height:1.95;color:var(--ink-2);margin-bottom:20px}.hero-meta{display:flex;align-items:center;gap:14px;font-size:11px;letter-spacing:.5px;color:var(--muted);margin:22px 0}.hero-meta>span:first-child{font-weight:700;color:var(--ink-2)}.meta-divider{color:var(--border)}.repo-card{border:1px solid var(--border);background:var(--panel);display:flex;align-items:center;gap:16px;border-radius:10px;padding:15px 18px;margin:28px 0 32px;max-width:780px;color:var(--ink)}.repo-card:hover{border-color:var(--accent);text-decoration:none}.repo-card small{color:var(--muted);display:block;font-size:10px;letter-spacing:.6px;margin-bottom:1px}.repo-card strong{display:block;font-family:var(--mono);font-size:11px;word-break:break-word}.repo-symbol{font-size:23px;color:var(--accent);line-height:1}.repo-arrow{margin-left:auto;font-size:18px;color:var(--muted)}.prose{max-width:800px;margin-left:auto;margin-right:auto}.prose p{font-size:15px;line-height:2;color:var(--ink-2);letter-spacing:.1px}.prose strong{color:var(--ink)}.intro{padding-top:10px}.ref{font-size:10px;vertical-align:super;font-family:var(--mono);white-space:nowrap;margin-left:3px}.chapter-map{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:28px 0}.chapter-map a{border:1px solid var(--border);background:var(--panel);border-radius:10px;padding:15px 18px;display:flex;flex-direction:column;color:var(--ink)}.chapter-map a:hover{border-color:var(--accent);text-decoration:none}.map-num{font-family:var(--mono);font-size:10px;color:var(--muted)}.map-glyph{font-family:var(--mono);font-size:18px;letter-spacing:1px;color:var(--accent);margin:12px 0}.chapter-map strong{font-size:13px}.chapter-map a>span:last-child{font-size:11px;color:var(--muted)}.chapter{padding-top:66px;margin-top:50px;border-top:1px solid var(--border);scroll-margin-top:85px}.chapter-heading{display:flex;align-items:flex-start;gap:20px;margin-bottom:32px}.chapter-number{font-family:var(--mono);font-size:43px;font-weight:350;color:var(--accent);line-height:1.25;letter-spacing:-2px}.chapter-heading .eyebrow{margin-bottom:9px;font-size:9px}.chapter-heading h2{font-size:34px}.prose[id],figure[id],details[id]{scroll-margin-top:96px}.equation{background:var(--panel);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:22px 24px;margin:23px 0 27px;line-height:1.9;color:var(--ink);overflow:auto}.equation>span{font-family:var(--math);font-size:22px;white-space:nowrap;display:block}.equation small{font-size:11px;color:var(--muted);display:block;margin-top:12px;line-height:1.8}.equation.compact>span{font-size:20px}.fraction{display:inline-flex;flex-direction:column;text-align:center;vertical-align:middle;line-height:1.4;font-size:.88em;padding:0 4px}.fraction>span:first-child{border-bottom:1px solid currentColor;padding:0 6px}.fraction>span:last-child{padding:0 6px}.sum{display:inline-block;position:relative;font-size:1.4em;margin:0 9px 0 6px;line-height:1.8}.sum sub,.sum sup{position:absolute;left:50%;transform:translateX(-50%);font-size:10px}.sum sub{bottom:0}.sum sup{top:0}.paren{font-size:1.4em;vertical-align:-.05em}.topology{border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:22px 20px 20px;margin:24px 0 28px}.topology-row{display:flex;gap:12px;align-items:center;justify-content:space-between}.topology-row>span{display:flex;flex-direction:column;flex:1;background:var(--blue-soft);color:var(--blue);padding:12px 6px;border-radius:6px;text-align:center;font-family:var(--mono);font-size:11px;white-space:nowrap}.topology-row b{font-size:9px;opacity:.8;margin-bottom:3px}.topology-row i{font-style:normal;color:var(--muted)}.topology-row.returning>span{background:color-mix(in srgb,var(--purple) 12%,var(--panel));color:var(--purple)}.fold-arrow{text-align:right;font-size:10px;line-height:1.5;color:var(--muted);padding:6px 10px}.interactive,.data-figure{border:1px solid var(--border);border-radius:13px;background:var(--panel);overflow:hidden;box-shadow:var(--shadow)}.figure-header{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:23px 24px 17px}.figure-kicker{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;color:var(--muted);line-height:1.5;margin-bottom:7px}.figure-header h4{font-size:18px;line-height:1.5;margin:0;letter-spacing:-.2px}.figure-tag{font-family:var(--mono);font-size:9px;padding:4px 8px;line-height:1.5;border:1px solid var(--border);border-radius:4px;color:var(--muted);white-space:nowrap}.figure-controls{padding:0 24px 15px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}.figure-controls label{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:8px}.figure-controls select{background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--ink);padding:5px 22px 5px 8px;max-width:100%;font-size:11px;line-height:1.5}.control-hint{font-family:var(--mono);font-size:9px;color:var(--muted)}.stepper{display:flex;gap:7px;align-items:center;overflow-x:auto;padding:0 24px 18px;scrollbar-width:thin}.stepper button{display:flex;align-items:center;gap:7px;flex-shrink:0;border:1px solid var(--border);padding:7px 11px;background:var(--panel);border-radius:7px;font-size:11px;line-height:1.6;white-space:nowrap;color:var(--ink-2);transition:background .18s,border-color .18s,color .18s}.stepper button:hover{border-color:var(--accent);color:var(--accent-strong)}.stepper button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-strong)}.stepper .step-num{font-family:var(--mono);font-size:9px;opacity:.7}.trace-pair{padding:0 20px;display:flex;flex-direction:column;gap:12px}.trace-panel{background:var(--trace-bg);border:1px solid var(--trace-grid);border-radius:8px;overflow:hidden;color:var(--trace-ink)}.trace-title{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 4px;font-size:10px;color:var(--trace-ink);gap:10px}.trace-title b{color:#eff5f9;margin-right:10px;font-family:var(--mono);font-size:11px}.trace-title>span:last-child{font-family:var(--mono);font-size:10px;color:#84c8b8}.svg-scroll{width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}.svg-scroll svg{display:block;width:100%;height:auto;font-family:var(--sans)}.svg-scroll svg text{user-select:none}.figure-legend{display:flex;justify-content:flex-start;flex-wrap:wrap;gap:18px;padding:13px 25px 4px;color:var(--muted);font-size:10px}.figure-legend>span{display:flex;align-items:center;gap:6px}.key{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--blue)}.key.returning{background:var(--purple)}.key.idle{background:var(--panel-2);border:1px dashed var(--muted)}.key.cursor{width:2px;background:var(--accent)}.figure-explanation{padding:15px 24px 18px;font-size:13px;line-height:1.9;color:var(--ink-2);min-height:75px}.figure-explanation strong{color:var(--ink)}.figure-explanation .ex-label{color:var(--accent-strong);font-family:var(--mono);font-size:10px;letter-spacing:.7px;display:block;margin-bottom:5px}.figure-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:0 24px 18px;background:var(--panel-2);border-radius:7px;padding:13px 0}.figure-metrics>div{padding:0 16px;border-right:1px solid var(--border)}.figure-metrics>div:last-child{border-right:0}.figure-metrics small{display:block;font-size:9px;color:var(--muted);letter-spacing:.2px}.figure-metrics strong{font-family:var(--mono);font-size:18px;font-weight:500;display:block;line-height:1.7;color:var(--ink)}.figure-metrics strong em{font-style:normal;font-family:var(--sans);font-size:10px;color:var(--muted);margin-left:4px}.figure-metrics span{font-size:9px;color:var(--muted)}.segmented{display:flex;flex-shrink:0;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;padding:3px;gap:3px}.segmented button{font-size:10px;line-height:1.5;border:0;background:transparent;color:var(--muted);padding:5px 9px;border-radius:4px;white-space:nowrap}.segmented button[aria-pressed=true]{background:var(--panel);color:var(--accent-strong);box-shadow:0 1px 4px rgba(0,0,0,.07)}.benchmark-bars{padding:10px 25px 22px}.bench-row{margin:0 0 22px}.bench-row:last-child{margin:0}.bench-row-title{font-size:12px;display:flex;justify-content:space-between;gap:10px;font-weight:600;line-height:1.7;margin-bottom:8px}.bench-gain{font-family:var(--mono);color:var(--accent-strong);font-size:11px;font-weight:550}.bench-gain.neutral{color:var(--muted)}.barline{display:grid;grid-template-columns:53px minmax(0,1fr) 96px;gap:10px;align-items:center;margin:5px 0;font-size:10px}.barline .barname{color:var(--muted);font-family:var(--mono)}.bartrack{height:13px;border-radius:3px;background:var(--panel-2);overflow:hidden}.barfill{height:100%;border-radius:3px;transition:width .3s ease;background:var(--accent)}.barfill.baseline{background:#9daab5}:root[data-theme=dark] .barfill.baseline{background:#607685}.barvalue{font-family:var(--mono);font-size:10px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}.deep-dive{margin:30px 0 10px;border:1px solid var(--border);background:var(--panel);border-radius:11px;overflow:hidden}.deep-dive>summary,.experiment>summary{list-style:none;display:flex;gap:14px;align-items:center;padding:21px 22px;cursor:pointer;line-height:1.6;color:var(--ink)}summary::-webkit-details-marker{display:none}.detail-icon{font-size:17px;color:var(--accent);line-height:1;display:grid;place-items:center;width:22px;flex:none;transition:transform .2s}.deep-dive[open]>.details-body{border-top:1px solid var(--border)}details[open]>summary .detail-icon{transform:rotate(45deg)}summary strong{font-size:14px;font-weight:650;display:block}summary small{font-size:11px;color:var(--muted);display:block;margin-top:5px;font-weight:400}.detail-badge{margin-left:auto;font-family:var(--mono);font-size:8px;letter-spacing:1px;color:var(--muted);flex-shrink:0}.details-body{padding:6px 24px 24px}.details-body h3{font-size:21px}.details-body .prose p,.experiment-body p{font-size:14px}.interactive.nested{box-shadow:none}.experiment{border:1px solid var(--border);border-radius:9px;background:var(--panel-2);margin-top:30px;overflow:hidden}.experiment>summary{padding:18px}.experiment-body{padding:0 22px 20px;border-top:1px solid var(--border)}.experiment-body h4{font-size:17px}.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin:24px 0;padding:6px 16px}.config-grid>div{padding:11px 4px}.config-grid small{font-size:10px;color:var(--muted);display:block}.config-grid strong{font-family:var(--mono);font-size:11px;display:block;margin-top:4px}.table-wrap{overflow:auto;margin:22px 0;scrollbar-width:thin}table{width:100%;border-collapse:collapse;white-space:nowrap;font-size:11px;line-height:1.7;font-variant-numeric:tabular-nums}th{text-align:left;font-size:10px;font-weight:600;letter-spacing:.3px;color:var(--muted);border-bottom:1px solid var(--border);padding:10px 13px}td{border-bottom:1px solid var(--border);padding:12px 13px;color:var(--ink-2);font-family:var(--mono)}td:first-child{font-family:var(--sans);color:var(--ink)}td:last-child{color:var(--accent-strong)}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--accent-soft)}.source-line{font-size:11px!important;color:var(--muted)!important;margin-top:25px!important}.code-block{background:var(--code-bg);border:1px solid #2b3948;border-radius:9px;overflow:hidden;margin:26px 0}.code-heading{color:#91a6b5;letter-spacing:.5px;font-family:var(--mono);font-size:10px;border-bottom:1px solid #2b3948;padding:9px 18px}.strategy-cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:28px 0 34px}.strategy-cards>div{padding:20px;border:1px solid var(--border);background:var(--panel);border-radius:9px}.strategy-cards small{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--accent)}.strategy-cards strong{display:block;font-size:16px;margin:7px 0 10px}.strategy-cards p{font-size:12px;margin-bottom:18px;line-height:1.8}.strategy-tokens{display:flex;gap:5px;font-family:var(--mono);font-size:10px}.strategy-tokens span{flex:1;padding:5px 3px;text-align:center;border-radius:3px;background:var(--req0);color:#fff}.strategy-tokens .r1{background:var(--req1);color:#18282d}.strategy-tokens .mixed{background:linear-gradient(90deg,var(--req0) 50%,var(--req1) 50%);color:#fff;flex:1.4}.mini-detail{border-top:1px solid var(--border);padding:10px 24px 12px}.mini-detail summary{cursor:pointer;font-size:11px;color:var(--accent-strong);list-style:none}.mini-detail summary:before{content:'＋';margin-right:9px}.mini-detail[open] summary:before{content:'−'}.mini-detail .table-wrap{margin:12px 0 0;max-height:280px}.task-table th{position:sticky;top:0;background:var(--panel)}.credit-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 24px 0}.credit{border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:10px;color:var(--muted)}.credit strong{display:block;font-size:11px;font-weight:500;color:var(--ink);margin-bottom:3px}.credit.free{border-color:var(--accent);background:var(--accent-soft)}.credit.free strong{color:var(--accent-strong)}#dma-figure .trace-panel{margin:0 18px}.sub-index{font-family:var(--mono);font-size:14px;color:var(--accent);margin-right:8px;font-weight:400}.fusion-result-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:8px 24px 24px}.fusion-result-grid>div{padding:18px 20px;border:1px solid var(--border);border-radius:7px;background:var(--panel-2)}.fusion-result-grid small{font-size:10px;color:var(--muted);display:block}.fusion-result-grid strong{font-size:28px;letter-spacing:-1px;display:block;margin:8px 0;font-weight:650}.fusion-result-grid strong span{font-size:17px;color:var(--accent);margin-left:3px}.fusion-result-grid>div>span{font-size:11px;color:var(--ink-2)}.fusion-result-grid .result-highlight{border-color:var(--accent);background:var(--accent-soft)}.closing{border-top:1px solid var(--border);padding-top:60px;margin-top:70px}.closing .eyebrow{margin-bottom:14px}.closing h2{font-size:29px;margin-bottom:25px}.closing-line{font-size:19px!important;line-height:1.9!important;color:var(--ink)!important;margin:28px 0!important;letter-spacing:.3px}.closing-repo{font-size:13px;display:inline-flex;align-items:center;gap:30px;background:var(--accent);color:var(--panel);padding:12px 18px;border-radius:7px;margin-bottom:25px}.closing-repo:hover{text-decoration:none;opacity:.9}:root[data-theme=dark] .closing-repo{color:#102923}.references{padding-top:50px;margin-top:30px;border-top:1px solid var(--border)}.references .eyebrow{margin-bottom:14px}.references h2{font-size:24px;margin-bottom:18px}.references>p{font-size:12px;color:var(--muted)}.reference-list{list-style:none;counter-reset:ref;display:grid;grid-template-columns:1fr 1fr;gap:0 28px;margin:25px 0 0;padding:0}.reference-list li{counter-increment:ref;position:relative;padding:16px 0 16px 30px;border-bottom:1px solid var(--border);scroll-margin-top:100px}.reference-list li::before{content:'[' counter(ref) ']';font-family:var(--mono);font-size:10px;color:var(--muted);position:absolute;left:0;top:18px}.reference-list a{display:block;color:var(--ink-2);font-size:12px;line-height:1.7;font-weight:550}.reference-list a span{color:var(--accent);font-size:11px;margin-left:4px}.reference-list small{display:block;font-size:10px;line-height:1.8;color:var(--muted);margin-top:6px}.site-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:55px;padding:28px 0 34px;border-top:1px solid var(--border)}.site-footer strong{display:block;font-size:10px;letter-spacing:1.3px}.site-footer span{font-size:10px;color:var(--muted)}.site-footer a{font-size:11px}.tooltip{position:fixed;z-index:120;max-width:250px;pointer-events:none;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);box-shadow:0 5px 25px rgba(0,0,0,.17);padding:10px 12px;font-size:11px;line-height:1.75;font-family:var(--mono)}.tooltip strong{display:block;color:var(--accent-strong);margin-bottom:4px}.noscript{background:var(--accent-soft);color:var(--ink);padding:15px;position:fixed;bottom:0;left:0;right:0;font-size:13px;z-index:200}.diagram-title{font-size:12px;fill:var(--ink);font-weight:600}.diagram-label{font-size:10px;fill:var(--ink-2)}.diagram-small{font-size:9px;fill:var(--muted)}.diagram-mono{font-family:var(--mono)}.diagram-node{fill:var(--panel-2);stroke:var(--border);stroke-width:1.2}.diagram-node.active{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6}.diagram-edge{fill:none;stroke:var(--muted);stroke-width:1.5;opacity:.65}.diagram-edge.active{stroke:var(--accent);stroke-width:2.3;opacity:1}.diagram-caption{font-size:10px;fill:var(--accent-strong);font-weight:500}.diagram-memory{fill:color-mix(in srgb,var(--orange) 12%,var(--panel));stroke:var(--orange);stroke-width:1}.diagram-memory.active{stroke-width:1.8}.future{opacity:.19}.trace-panel .axis{fill:var(--trace-ink);font-size:9px;font-family:var(--mono)}.trace-panel .grid{stroke:var(--trace-grid);stroke-width:1}.trace-panel .track-label{font-size:10px;fill:#bbcfdf;font-family:var(--mono)}.trace-panel .block-label{font-size:8px;fill:#fff;font-family:var(--mono)}.trace-panel .phase-label{fill:#84c8b8;font-family:var(--mono);font-size:9px}.scene-enter{animation:scene-enter .26s ease-out both}.flow-active{stroke-dasharray:5 4;animation:flow-once .4s ease-out 1}@keyframes scene-enter{from{opacity:.55;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}@keyframes flow-once{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
-@media(min-width:1600px){main{max-width:1180px;padding-left:50px;padding-right:50px}.hero h1{font-size:72px}.prose{max-width:840px}}
-@media(max-width:1190px){.toc{width:194px;left:20px}.toc nav a{font-size:11px}.toc nav .toc-sub{font-size:10px;padding-left:24px}.toc-chapter span{margin-right:4px}main{margin-left:224px;margin-right:0;padding-left:24px;padding-right:24px}.hero h1{font-size:56px}.detail-badge{display:none}.figure-header{padding-left:20px;padding-right:20px}.hero-subtitle{font-size:23px}}
-@media(max-width:980px){.toc{display:none;top:72px;bottom:0;left:0;width:280px;background:var(--bg);padding:25px 14px 20px;border-right:1px solid var(--border);z-index:89}.toc.menu-open{display:flex}.toc nav a{font-size:13px;padding-top:8px;padding-bottom:8px}.toc nav .toc-sub{font-size:12px}.toc-scrim:not([hidden]){display:block;position:fixed;inset:72px 0 0;background:rgba(0,0,0,.4);z-index:88}.mobile-menu{display:grid}main{max-width:920px;margin:0 auto;padding:112px 30px 0}.site-header{padding:0 25px}.hero h1{font-size:60px}.hero-deck{max-width:750px}.prose{max-width:780px}.chapter{padding-top:50px;margin-top:40px}}
-@media(max-width:650px){body{font-size:15px}.site-header{height:62px;padding:0 17px}.wordmark{font-size:11px;letter-spacing:1px}.wordmark-sub{font-size:9px}.brand-mark{width:25px;height:25px;font-size:15px}.header-actions{gap:13px}.header-link{font-size:11px}.icon-button{width:30px;height:30px;font-size:17px}.toc{top:62px}.toc-scrim:not([hidden]){top:62px}main{padding:92px 18px 0}.hero{padding-top:0;padding-bottom:28px}.hero h1{font-size:clamp(38px,9.8vw,53px);letter-spacing:-1.5px;line-height:1.2}.hero-subtitle{font-size:19px;margin:15px 0 17px}.hero-deck{font-size:14px;line-height:1.95}.hero-meta{gap:10px;font-size:9px;margin-top:17px}.hero .eyebrow{font-size:8px;letter-spacing:1.2px;margin-bottom:19px;gap:8px}.eyebrow-line{width:20px}.repo-card{padding:12px;gap:10px;margin:22px 0 26px}.repo-card strong{font-size:9px}.repo-card small{font-size:9px}.repo-symbol{font-size:21px}.prose p{font-size:14px;line-height:2}.chapter-map{gap:8px;margin:22px 0}.chapter-map a{padding:11px}.map-glyph{font-size:12px;letter-spacing:0;margin:10px 0}.map-num{font-size:9px}.chapter-map strong{font-size:11px}.chapter-map a>span:last-child{font-size:9px}.chapter{margin-top:32px;padding-top:38px}.chapter-heading{gap:13px;margin-bottom:25px}.chapter-number{font-size:33px}.chapter-heading .eyebrow{font-size:8px;letter-spacing:.7px;margin-bottom:7px}.chapter-heading h2{font-size:26px;letter-spacing:-.4px}.prose h3{font-size:21px;margin:27px 0 13px;letter-spacing:0}.equation{padding:18px 14px;margin:21px 0}.equation>span{font-size:18px}.equation.compact>span{font-size:16px}.equation small{font-size:10px;white-space:normal}.topology{padding:14px 9px;margin:20px 0}.topology-row{gap:4px}.topology-row>span{font-size:8px;padding:10px 2px;line-height:1.8}.topology-row b{font-size:8px}.topology-row i{font-size:12px}.fold-arrow{font-size:9px;padding-right:3px}.interactive,.data-figure{border-radius:10px;margin:22px 0 29px}.figure-header{padding:17px 15px 14px;align-items:flex-start;flex-wrap:wrap;gap:10px}.figure-header h4{font-size:16px}.figure-kicker{font-size:8px;letter-spacing:1px;margin-bottom:5px}.figure-tag{font-size:8px;padding:3px 6px}.figure-controls{padding:0 15px 13px;gap:9px}.figure-controls label{font-size:9px;gap:5px}.figure-controls select{font-size:10px;padding-top:5px;padding-bottom:5px;max-width:240px}.control-hint{font-size:8px}.stepper{padding:0 15px 14px;gap:5px}.stepper button{font-size:10px;padding:6px 8px;gap:4px}.stepper .step-num{font-size:8px}.trace-pair{padding:0 10px;gap:9px}.trace-title{padding:10px 11px 4px;font-size:8px}.trace-title b{font-size:10px;margin-right:6px}.trace-title>span:last-child{font-size:8px}.trace-panel .svg-scroll svg{min-width:650px}.interactive>.svg-scroll svg{min-width:670px}.figure-legend{padding:11px 15px 2px;gap:12px;font-size:9px}.figure-explanation{padding:12px 15px 15px;font-size:12px;min-height:100px}.figure-explanation .ex-label{font-size:9px}.figure-metrics{margin:0 15px 15px;padding:10px 0}.figure-metrics>div{padding:0 9px}.figure-metrics small{font-size:8px;line-height:1.5;min-height:22px}.figure-metrics strong{font-size:15px}.figure-metrics strong em{font-size:8px}.figure-metrics span{font-size:8px;line-height:1.6;display:block}figcaption{font-size:10px;padding:12px 15px 14px;line-height:1.9}.segmented button{padding:5px 7px;font-size:9px}.benchmark-bars{padding:6px 15px 18px}.bench-row{margin-bottom:18px}.bench-row-title{font-size:11px}.bench-gain{font-size:10px}.barline{grid-template-columns:43px minmax(0,1fr) 80px;gap:7px;font-size:9px}.barvalue{font-size:9px}.bartrack{height:12px}.deep-dive>summary,.experiment>summary{padding:16px 13px;gap:9px}summary strong{font-size:12px}summary small{font-size:10px}.details-body{padding:2px 12px 15px}.details-body h3{font-size:19px}.details-body .prose p,.experiment-body p{font-size:13px}.interactive.nested{border-radius:8px}.experiment-body{padding:0 13px 15px}.config-grid{padding:5px 9px;gap:5px;margin-top:19px}.config-grid small{font-size:9px}.config-grid strong{font-size:10px;line-height:1.8}.config-grid>div{padding:8px 2px}th{font-size:9px;padding:9px 10px}td{font-size:10px;padding:10px}.code-heading{font-size:9px;padding:8px 12px}pre code{font-size:11px;padding:14px 12px}.strategy-cards{gap:10px}.strategy-cards>div{padding:15px 12px}.strategy-cards small{font-size:8px;letter-spacing:.7px}.strategy-cards strong{font-size:13px}.strategy-cards p{font-size:11px}.strategy-tokens{font-size:8px;gap:3px}.credit-row{margin:12px 12px 0;gap:5px}.credit{padding:8px 6px;font-size:8px}.credit strong{font-size:9px}#dma-figure .trace-panel{margin:0 9px}.mini-detail{padding:10px 15px}.fusion-result-grid{gap:8px;padding:5px 15px 17px}.fusion-result-grid>div{padding:13px 11px}.fusion-result-grid small{font-size:8px;line-height:1.7}.fusion-result-grid strong{font-size:24px;margin:6px 0}.fusion-result-grid>div>span{font-size:9px;line-height:1.7;display:block}.closing{margin-top:45px;padding-top:39px}.closing h2{font-size:25px}.closing-line{font-size:17px!important}.closing-repo{font-size:12px;padding:11px 15px}.references{padding-top:35px;margin-top:15px}.references .eyebrow{font-size:9px}.references h2{font-size:22px}.references>p{font-size:11px}.reference-list{grid-template-columns:1fr;gap:0;margin-top:20px}.reference-list a{font-size:11px}.reference-list small{font-size:10px}.site-footer{margin-top:35px;padding:22px 0 28px}.site-footer strong{font-size:9px}.site-footer a{font-size:10px}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}
-@media print{body{background:#fff;color:#000}.site-header,.toc,.reading-progress,.figure-controls,.stepper,.segmented,.tooltip,.skip-link{display:none!important}main{max-width:none;margin:0;padding:0}.hero h1{font-size:38px}.chapter{break-before:page;padding-top:15px;margin-top:20px}.interactive,.data-figure,.prose{break-inside:avoid-page}.references .reference-list{grid-template-columns:1fr}.trace-panel{-webkit-print-color-adjust:exact;print-color-adjust:exact}.deep-dive{break-inside:auto}.details-body,.experiment-body{display:block!important}a{color:#000}figcaption{font-size:9px}}
-
-.map-glyph{white-space:nowrap}
-@media(max-width:400px){.map-glyph{font-size:10px}}
-/* Keep the reading column centered in the space beside the contents rail. */
-@media screen and (min-width: 981px) {
-  body {
-    --shell: min(calc(100% - 48px), 1420px);
-    --rail: clamp(190px, 16vw, 224px);
-    --gutter: clamp(24px, 3vw, 56px);
-  }
-  .toc { left: calc((100% - var(--shell)) / 2); width: var(--rail); }
-  main {
-    width: calc(var(--shell) - var(--rail) - var(--gutter));
-    max-width: none;
-    margin-inline: calc((100% - var(--shell)) / 2 + var(--rail) + var(--gutter)) auto;
-    padding-inline: 0;
-  }
-  .site-header { padding-inline: max(24px, calc((100% - 1420px) / 2)); }
-}
-.header-actions, .chapter-heading > div, .figure-header > div,
-.strategy-cards > div, .fusion-result-grid > div { min-width: 0; }
-#language-switch { white-space: nowrap; padding-block: 6px; }
-.hero-meta { flex-wrap: wrap; }
-.chapter-map a, .repo-card > span, summary > span { min-width: 0; }
-.figure-controls label { max-width: 100%; flex-wrap: wrap; }
-.equation, .table-wrap, .svg-scroll, pre { overscroll-behavior-x: contain; }
-.equation > span { width: max-content; margin-inline: auto; }
-.equation small { text-align: start; }
-@media screen and (max-width: 650px) {
-  .header-actions { gap: 9px; }
-  .wordmark-divider, .wordmark-sub { display: none; }
-  .figure-header { align-items: center; }
-  .stepper { flex-wrap: wrap; overflow: visible; }
-  .stepper button { white-space: normal; }
-
-  .figure-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .figure-metrics small, .figure-metrics span, .credit, .config-grid strong { overflow-wrap: anywhere; }
-  .trace-title { flex-wrap: wrap; }
-  .interactive .svg-scroll svg { min-width: 720px; }
-  .chapter-map, .strategy-cards, .fusion-result-grid { grid-template-columns: 1fr; }
-  .chapter-map a { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); column-gap: 12px; }
-  .chapter-map .map-num { grid-column: 1; grid-row: 1; }
-  .chapter-map .map-glyph { grid-column: 1; grid-row: 2; align-self: center; font-size: 8px; margin: 0; }
-  .chapter-map strong, .chapter-map a > span:last-child { grid-column: 2; }
-  .fusion-result-grid > div { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 3px 10px; }
-  .fusion-result-grid > div > span { grid-column: 1 / -1; }
-  .fusion-result-grid strong { margin: 0; }
-  .equation { scrollbar-width: thin; }
-}
-@media screen and (max-width: 1100px) {
-  .stepper { flex-wrap: wrap; }
-}
-@media screen and (max-width: 650px) {
-
-  .barline { font-size: 10px; }
-}
-@media screen {
-  /* The fixed header is accounted for by the document scroll padding. */
-  main [id] { scroll-margin-top: 0; }
+<style>/* Design tokens and the shared 800px reading track. */
+:root {
+  --bg: #fff;
+  --panel: #fff;
+  --panel-2: #f5f7f9;
+  --ink: #1c2733;
+  --ink-2: #354352;
+  --muted: #697786;
+  --border: #e0e6eb;
+  --accent: #087f79;
+  --accent-strong: #006b65;
+  --accent-soft: #eaf6f3;
+  --blue: #4878c9;
+  --blue-soft: #edf3fc;
+  --purple: #8962ba;
+  --orange: #c97a39;
+  --code-bg: #14202c;
+  --trace-bg: #15212f;
+  --trace-grid: #2c3a4b;
+  --trace-ink: #b8c9d6;
+  --req0: #4e86ce;
+  --req1: #d69749;
+  --req2: #8d74c4;
+  --req3: #3fa495;
+  --sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --math: 'Cambria Math', 'STIX Two Math', Georgia, 'Times New Roman', serif;
+  --reading-width: 50rem;
+  --rail-width: 13rem;
+  --column-gap: 3.5rem;
+  --shell-width: calc(var(--reading-width) + var(--column-gap) + var(--rail-width));
+  --header-height: 4rem;
+  color-scheme: light;
 }
 
-.hero { container-type: inline-size; padding-bottom: 36px; }
-.hero-grid { display: grid; gap: 24px; align-items: center; }
-.hero-copy { min-width: 0; }
-.hero-copy h1 { font-size: clamp(38px, 6cqi, 72px); line-height: 1.15; }
-.hero-copy .hero-deck { margin-bottom: 16px; }
-.hero-copy .repo-card { max-width: none; margin: 20px 0 0; }
+:root[data-theme=dark] {
+  --bg: #11181f;
+  --panel: #11181f;
+  --panel-2: #19242e;
+  --ink: #e1e9ec;
+  --ink-2: #bbc9d2;
+  --muted: #8da0ad;
+  --border: #2d3d49;
+  --accent: #62cabc;
+  --accent-strong: #83dfd1;
+  --accent-soft: #1e3738;
+  --blue: #85ade7;
+  --blue-soft: #213449;
+  --purple: #b699dd;
+  --orange: #dfaa70;
+  --code-bg: #0c141c;
+  --trace-bg: #0d1722;
+  --trace-grid: #233343;
+  --trace-ink: #a3bacb;
+  --req0: #6499df;
+  --req1: #d8a262;
+  --req2: #a48dd6;
+  --req3: #65b7a7;
+  color-scheme: dark;
+}
+
+/* Global type, element defaults, and the single article shell. */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--header-height) + 1.5rem);
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.article-shell {
+  display: grid;
+  grid-template-columns: minmax(0, var(--reading-width)) var(--rail-width);
+  align-items: start;
+  column-gap: var(--column-gap);
+  width: min(calc(100% - 3rem), var(--shell-width));
+  margin-inline: auto;
+  padding-top: calc(var(--header-height) + 3rem);
+}
+
+#article {
+  min-width: 0;
+  padding: 0;
+}
+
+.prose, .wide {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+}
+
+.prose p, .experiment-body p {
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+button, select, input {
+  font: inherit;
+}
+
+button, a, select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 5px;
+}
+
+h1, h2, h3, h4 {
+  color: var(--ink);
+  line-height: 1.3;
+  margin: 0;
+  font-weight: 700;
+  text-wrap: pretty;
+}
+
+h2 {
+  font-size: 32px;
+  letter-spacing: -.7px;
+}
+
+h3 {
+  font-size: 23px;
+  letter-spacing: -.35px;
+  margin: 2.25rem 0 1rem;
+}
+
+h4 {
+  font-size: 18px;
+  margin: 24px 0 10px;
+}
+
+p {
+  margin: 0 0 1.25rem;
+}
+
+small {
+  font-size: 12px;
+}
+
+strong {
+  font-weight: 650;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: .86em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  overflow-wrap: anywhere;
+}
+
+pre {
+  white-space: pre;
+  overflow-x: auto;
+  tab-size: 4;
+  margin: 0;
+}
+
+pre code {
+  display: block;
+  word-break: normal;
+  padding: 18px 20px;
+  background: none;
+  color: #d5e4ed;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.equation, .table-wrap, .svg-scroll, pre {
+  overscroll-behavior-x: contain;
+}
+
+i:not(.key) {
+  font-style: italic;
+}
+
+sub, sup {
+  font-size: 72%;
+  line-height: 0;
+}
+
+figure {
+  margin: 2rem 0 2.5rem;
+  min-width: 0;
+}
+
+figcaption {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 100%;
+  display: inline-block;
+  background: var(--accent);
+  flex: none;
+}
+
+/* Persistent header and right-hand contents rail. */
+.reading-progress {
+  height: 2px;
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 100;
+  background: transparent;
+}
+
+.reading-progress span {
+  height: 100%;
+  width: 0;
+  display: block;
+  background: var(--accent);
+}
+
+.skip-link {
+  position: fixed;
+  top: -100px;
+  left: 20px;
+  z-index: 110;
+  background: var(--panel);
+  padding: 10px;
+}
+
+.skip-link:focus {
+  top: 10px;
+}
+
+.site-header {
+  height: var(--header-height);
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  z-index: 90;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 max(24px, calc((100% - var(--shell-width))/2));
+}
+
+.wordmark {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  letter-spacing: 1.4px;
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.wordmark:hover {
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 5px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.wordmark-divider {
+  color: var(--border);
+  padding: 0 4px;
+}
+
+.wordmark-sub {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
+
+.header-link {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#language-switch {
+  white-space: nowrap;
+  padding-block: 6px;
+}
+
+.icon-button {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  width: 32px;
+  height: 32px;
+  background: var(--panel);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 1;
+  font-size: 18px;
+}
+
+.mobile-menu {
+  display: none;
+}
+
+.toc {
+  position: sticky;
+  top: calc(var(--header-height) + 2.5rem);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: calc(100dvh - var(--header-height) - 4rem);
+  padding-inline-start: 1rem;
+  border-inline-start: 1px solid var(--border);
+  z-index: 50;
+}
+
+.toc-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 1.3px;
+  margin: 0 0 16px;
+  padding: 0;
+  gap: 8px;
+}
+
+.toc-heading span {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--accent);
+}
+
+.toc nav {
+  overflow: auto;
+  scrollbar-width: thin;
+  padding: 0 3px 16px 0;
+}
+
+.toc nav a {
+  display: block;
+  border-left: 2px solid transparent;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  padding: 5px 0 5px 10px;
+  margin-bottom: 2px;
+}
+
+.toc nav a:hover {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.toc nav a.active {
+  color: var(--accent-strong);
+  border-left-color: var(--accent);
+}
+
+.toc nav .toc-main {
+  font-weight: 600;
+  color: var(--ink-2);
+  margin: 6px 0;
+}
+
+.toc nav .toc-chapter {
+  font-weight: 650;
+  color: var(--ink-2);
+  margin-top: 12px;
+}
+
+.toc-chapter span {
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--accent);
+  margin-right: 5px;
+}
+
+.toc nav .toc-sub {
+  padding-left: 16px;
+  font-size: 11px;
+}
+
+.toc-bottom {
+  margin-top: 12px;
+  font-size: 10px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+  color: var(--ink-2);
+  line-height: 1.9;
+}
+
+.toc-bottom .dot {
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+}
+
+.toc-bottom .muted {
+  font-size: 10px;
+}
+
+.toc-scrim {
+  display: none;
+}
+
+/* Compact article opening and linked performance summaries. */
+.hero {
+  padding: 0 0 2rem;
+}
+
+.hero-grid {
+  display: grid;
+  gap: 1.75rem;
+}
+
+.hero-copy,
+.repo-card > span,
+.header-actions,
+.chapter-heading > div,
+.figure-header > div,
+summary > span {
+  min-width: 0;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  letter-spacing: 1.5px;
+  font-weight: 500;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
+
+.eyebrow-line {
+  display: inline-block;
+  width: 40px;
+  height: 1px;
+  background: var(--border);
+}
+
+.hero h1 {
+  font-size: 48px;
+  letter-spacing: -1.8px;
+  line-height: 1.15;
+  font-weight: 750;
+}
+
+.hero-accent {
+  color: var(--accent-strong);
+}
+
+.hero-subtitle {
+  font-size: 24px;
+  line-height: 1.45;
+  letter-spacing: -.3px;
+  font-weight: 500;
+  margin: 16px 0;
+  color: var(--ink);
+}
+
+.hero-deck {
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  margin-bottom: 16px;
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: .5px;
+  color: var(--muted);
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.hero-meta > span:first-child {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.meta-divider {
+  color: var(--border);
+}
+
+.repo-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 13px 0;
+  border-block: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.repo-card:hover {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.repo-card small {
+  color: var(--muted);
+  display: block;
+  font-size: 10px;
+  letter-spacing: .6px;
+  margin-bottom: 1px;
+}
+
+.repo-card strong {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.repo-symbol {
+  font-size: 23px;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.repo-arrow {
+  margin-left: auto;
+  font-size: 18px;
+  color: var(--muted);
+}
+
 .hero-results {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-results a {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 0 18px 20px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.hero-results a:first-child {
+  padding-inline-start: 0;
+}
+
+.hero-results a:last-child {
+  padding-inline-end: 0;
+}
+
+.hero-results a + a {
+  border-inline-start: 1px solid var(--border);
+}
+
+.hero-results small {
+  font: 600 10px/1.5 var(--mono);
+  color: var(--accent-strong);
+}
+
+.hero-results strong {
+  font-size: 31px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.055em;
+  white-space: nowrap;
+}
+
+.hero-results strong span {
+  margin-inline-start: 2px;
+  font-size: .63em;
+  font-weight: 500;
+}
+
+.hero-results a > span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.hero-results a:hover strong, .hero-results a:focus-visible strong {
+  color: var(--accent-strong);
+}
+
+.prose strong {
+  color: var(--ink);
+}
+
+.intro {
+  padding-top: .25rem;
+}
+
+.ref {
+  font-size: 10px;
+  vertical-align: super;
+  font-family: var(--mono);
+  white-space: nowrap;
+  margin-left: 3px;
+}
+
+.chapter-map {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin: 28px 0;
+}
+
+.chapter-map a {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 0;
+  border-block: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.chapter-map a:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.map-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.map-glyph {
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--accent);
+  margin: 10px 0;
+  white-space: nowrap;
+}
+
+.chapter-map strong {
+  font-size: 14px;
+}
+
+.chapter-map a > span:last-child {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+/* Section headings remain on the same edge as the body text. */
+.chapter {
+  margin-top: 3.5rem;
+  padding-top: 3.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.chapter-heading {
+  position: relative;
+  margin-bottom: 2rem;
+}
+
+.chapter-number {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.chapter-heading .eyebrow {
+  margin-bottom: 12px;
+  padding-inline-start: 30px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.chapter-heading h2 {
+  font-size: 32px;
+}
+
+/* Equations and the folded pipeline topology. */
+.equation {
+  background: var(--panel-2);
+  padding: 20px 18px;
+  margin: 24px 0 28px;
+  line-height: 1.9;
+  color: var(--ink);
+  overflow: auto;
+  border-block: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+.equation > span {
+  font-family: var(--math);
+  font-size: 22px;
+  white-space: nowrap;
+  display: block;
+  width: max-content;
+  margin-inline: auto;
+}
+
+.equation small {
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+  margin-top: 12px;
+  line-height: 1.7;
+  text-align: start;
+}
+
+.equation.compact > span {
+  font-size: 20px;
+}
+
+.fraction {
+  display: inline-flex;
+  flex-direction: column;
+  text-align: center;
+  vertical-align: middle;
+  line-height: 1.4;
+  font-size: .88em;
+  padding: 0 4px;
+}
+
+.fraction > span:first-child {
+  border-bottom: 1px solid currentColor;
+  padding: 0 6px;
+}
+
+.fraction > span:last-child {
+  padding: 0 6px;
+}
+
+.sum {
+  display: inline-block;
+  position: relative;
+  font-size: 1.4em;
+  margin: 0 9px 0 6px;
+  line-height: 1.8;
+}
+
+.sum sub, .sum sup {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+}
+
+.sum sub {
+  bottom: 0;
+}
+
+.sum sup {
+  top: 0;
+}
+
+.paren {
+  font-size: 1.4em;
+  vertical-align: -.05em;
+}
+
+.topology {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 18px;
+  margin: 26px 0 30px;
+}
+
+.topology-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.topology-row > span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  background: var(--blue-soft);
+  color: var(--blue);
+  padding: 12px 6px;
+  border-radius: 3px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.topology-row b {
+  font-size: 9px;
+  opacity: .8;
+  margin-bottom: 3px;
+}
+
+.topology-row i {
+  font-style: normal;
+  color: var(--muted);
+}
+
+.topology-row.returning > span {
+  background: color-mix(in srgb, var(--purple) 12%, var(--panel));
+  color: var(--purple);
+}
+
+.fold-arrow {
+  text-align: right;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 6px 10px;
+}
+
+/* Article figures: flush headings/captions around bounded canvases. */
+.interactive, .data-figure {
+  background: var(--panel);
+}
+
+.figure-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.figure-kicker {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.figure-header h4 {
+  font-size: 18px;
+  line-height: 1.5;
+  margin: 0;
+  letter-spacing: -.2px;
+}
+
+.figure-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 7px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.figure-controls {
+  padding: 0 0 14px;
+  display: flex;
+  gap: 12px 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.figure-controls label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.figure-controls select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--ink);
+  padding: 5px 22px 5px 8px;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.control-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.stepper {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+}
+
+.stepper button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  background: var(--panel);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  transition: background .18s, border-color .18s, color .18s;
+}
+
+.stepper button:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.stepper button[aria-pressed=true] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.stepper .step-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: .7;
+}
+
+.trace-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trace-panel {
+  background: var(--trace-bg);
+  border: 1px solid var(--trace-grid);
+  border-radius: 4px;
+  overflow: hidden;
+  color: var(--trace-ink);
+}
+
+.trace-panel .svg-scroll {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.trace-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px 4px;
+  font-size: 11px;
+  color: var(--trace-ink);
+  gap: 4px 12px;
+  flex-wrap: wrap;
+}
+
+.trace-title b {
+  color: #eff5f9;
+  margin-right: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.trace-title > span:last-child {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #84c8b8;
+}
+
+.svg-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.svg-scroll svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--sans);
+}
+
+.svg-scroll svg text {
+  user-select: none;
+}
+
+#load-chart svg {
+  width: 100%;
+  min-width: 0;
+}
+
+#load-chart .diagram-small {
+  font-size: 11px;
+}
+
+#load-chart .diagram-title {
+  font-size: 13px;
+}
+
+.figure-legend {
+  display: flex;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 12px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.figure-legend > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--blue);
+}
+
+.key.returning {
+  background: var(--purple);
+}
+
+.key.idle {
+  background: var(--panel-2);
+  border: 1px dashed var(--muted);
+}
+
+.key.cursor {
+  width: 2px;
+  background: var(--accent);
+}
+
+.figure-explanation {
+  padding: 16px 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+.figure-explanation strong {
+  color: var(--ink);
+}
+
+.figure-explanation .ex-label {
+  color: var(--accent-strong);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .7px;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.figure-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 16px;
+  padding: 12px 0;
   border-block: 1px solid var(--border);
 }
-.hero-results a {
-  position: relative; display: grid; gap: 4px; align-content: center;
-  padding: 16px; color: var(--ink); text-decoration: none;
+
+.figure-metrics > div {
+  padding: 0 16px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
 }
-.hero-results a + a { border-inline-start: 1px solid var(--border); }
-.hero-results small { font: 600 10px/1.5 var(--mono); color: var(--accent-strong); }
-.hero-results strong {
-  font-size: clamp(22px, 3.4cqi, 39px); line-height: 1.15;
-  font-variant-numeric: tabular-nums; letter-spacing: -.045em; white-space: nowrap;
+
+.figure-metrics > div:first-child {
+  padding-inline-start: 0;
 }
-.hero-results strong span { margin-inline-start: 2px; font-size: .63em; font-weight: 500; }
-.hero-results a > span { font-size: 12px; line-height: 1.5; color: var(--ink-2); }
-.hero-results a:hover, .hero-results a:focus-visible { background: var(--accent-soft); }
-@container (min-width: 760px) {
-  .hero-grid { grid-template-columns: minmax(0, 1.55fr) minmax(250px, 1fr); gap: clamp(32px, 5cqi, 76px); }
-  .hero-results {
-    grid-template-columns: 1fr; align-self: stretch; align-content: center;
-    padding-inline-start: clamp(22px, 3cqi, 48px); border: 0; border-inline-start: 1px solid var(--border);
+
+.figure-metrics > div:last-child {
+  padding-inline-end: 0;
+  border-right: 0;
+}
+
+.figure-metrics small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: .2px;
+  line-height: 1.6;
+}
+
+.figure-metrics strong {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 500;
+  display: block;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.figure-metrics strong em {
+  font-style: normal;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.figure-metrics span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.segmented {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmented button {
+  font-size: 11px;
+  line-height: 1.5;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 8px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.segmented button[aria-pressed=true] {
+  background: var(--panel);
+  color: var(--accent-strong);
+}
+
+.benchmark-bars {
+  padding: 8px 0 24px;
+}
+
+.bench-row {
+  margin: 0 0 22px;
+}
+
+.bench-row:last-child {
+  margin: 0;
+}
+
+.bench-row-title {
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 600;
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+
+.bench-gain {
+  font-family: var(--mono);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.bench-gain.neutral {
+  color: var(--muted);
+}
+
+.barline {
+  display: grid;
+  grid-template-columns: 53px minmax(0, 1fr) 96px;
+  gap: 10px;
+  align-items: center;
+  margin: 5px 0;
+  font-size: 11px;
+}
+
+.barline .barname {
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.bartrack {
+  height: 12px;
+  border-radius: 2px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.barfill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .3s ease;
+  background: var(--accent);
+}
+
+.barfill.baseline {
+  background: #9daab5;
+}
+
+:root[data-theme=dark] .barfill.baseline {
+  background: #607685;
+}
+
+.barvalue {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Expanded implementation sections preserve the reading edges at every depth. */
+.deep-dive {
+  margin: 2rem 0 1rem;
+  border-block: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.deep-dive > summary, .experiment > summary {
+  list-style: none;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 18px 0;
+  cursor: pointer;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-icon {
+  font-size: 17px;
+  color: var(--accent);
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  flex: none;
+  transition: transform .2s;
+}
+
+details[open] > summary .detail-icon {
+  transform: rotate(45deg);
+}
+
+summary strong {
+  font-size: 15px;
+  font-weight: 650;
+  display: block;
+}
+
+summary small {
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+.detail-badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: .7px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.details-body {
+  padding: 8px 0 20px;
+}
+
+.details-body h3 {
+  font-size: 22px;
+}
+
+.experiment {
+  margin: 2rem 0 1rem;
+  border-block: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.experiment > summary {
+  padding: 16px 0;
+}
+
+.experiment-body {
+  padding: 16px 0 20px;
+  border-top: 1px solid var(--border);
+}
+
+.details-body > :last-child, .experiment-body > :last-child {
+  margin-bottom: 0;
+}
+
+.experiment-body h4 {
+  font-size: 18px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 24px 0;
+  padding: 4px 0;
+  border-block: 1px solid var(--border);
+}
+
+.config-grid > div {
+  min-width: 0;
+  padding-block: 10px;
+}
+
+.config-grid small {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+}
+
+.config-grid strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin: 22px 0;
+  scrollbar-width: thin;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 12px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+}
+
+th:first-child, td:first-child {
+  padding-inline-start: 0;
+}
+
+th:last-child, td:last-child {
+  padding-inline-end: 0;
+}
+
+td:first-child {
+  font-family: var(--sans);
+  color: var(--ink);
+}
+
+td:last-child {
+  color: var(--accent-strong);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.prose .source-line {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 24px;
+}
+
+.code-block {
+  background: var(--code-bg);
+  border: 1px solid #2b3948;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 26px 0;
+}
+
+.code-heading {
+  color: #91a6b5;
+  letter-spacing: .5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border-bottom: 1px solid #2b3948;
+  padding: 9px 18px;
+}
+
+/* Supporting comparisons and data summaries. */
+.strategy-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 28px 0 34px;
+}
+
+.strategy-cards > div {
+  min-width: 0;
+  padding-block: 16px;
+  border-block: 1px solid var(--border);
+}
+
+.strategy-cards small {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .8px;
+  color: var(--accent);
+}
+
+.strategy-cards strong {
+  display: block;
+  font-size: 16px;
+  margin: 7px 0 10px;
+}
+
+.strategy-cards p {
+  font-size: 14px;
+  margin-bottom: 16px;
+  line-height: 1.7;
+}
+
+.strategy-tokens {
+  display: flex;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.strategy-tokens span {
+  flex: 1;
+  padding: 5px 3px;
+  text-align: center;
+  border-radius: 2px;
+  background: var(--req0);
+  color: #fff;
+}
+
+.strategy-tokens .r1 {
+  background: var(--req1);
+  color: #18282d;
+}
+
+.strategy-tokens .mixed {
+  background: linear-gradient(90deg, var(--req0) 50%, var(--req1) 50%);
+  color: #fff;
+  flex: 1.4;
+}
+
+.mini-detail {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+}
+
+.mini-detail summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--accent-strong);
+  list-style: none;
+}
+
+.mini-detail summary:before {
+  content: '＋';
+  margin-right: 9px;
+}
+
+.mini-detail[open] summary:before {
+  content: '−';
+}
+
+.mini-detail .table-wrap {
+  margin: 12px 0 0;
+  max-height: 280px;
+}
+
+.task-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+.credit-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.credit {
+  min-width: 0;
+  padding: 10px 0;
+  border-block: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.credit strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+
+.credit.free {
+  border-color: var(--accent);
+}
+
+.credit.free strong {
+  color: var(--accent-strong);
+}
+
+.sub-index {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  margin-right: 8px;
+  font-weight: 400;
+}
+
+.fusion-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  padding: 6px 0 24px;
+}
+
+.fusion-result-grid > div {
+  min-width: 0;
+  padding-block: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.fusion-result-grid small {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+}
+
+.fusion-result-grid strong {
+  font-size: 30px;
+  letter-spacing: -1px;
+  display: block;
+  margin: 8px 0;
+  font-weight: 650;
+}
+
+.fusion-result-grid strong span {
+  font-size: 17px;
+  color: var(--accent);
+  margin-left: 3px;
+}
+
+.fusion-result-grid > div > span {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.fusion-result-grid .result-highlight {
+  border-color: var(--accent);
+}
+
+.fusion-result-grid .result-highlight strong {
+  color: var(--accent-strong);
+}
+
+/* Closing text, sources, and article footer. */
+.closing {
+  border-top: 1px solid var(--border);
+  padding-top: 3.5rem;
+  margin-top: 4rem;
+}
+
+.closing .eyebrow {
+  margin-bottom: 14px;
+}
+
+.closing h2 {
+  font-size: 30px;
+  margin-bottom: 24px;
+}
+
+.closing .closing-line {
+  font-size: 20px;
+  line-height: 1.7;
+  color: var(--ink);
+  margin: 28px 0;
+}
+
+.closing-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding-block: 9px;
+  border-bottom: 1px solid var(--accent);
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.closing-repo:hover {
+  text-decoration: none;
+  border-bottom-width: 2px;
+}
+
+.references {
+  padding-top: 40px;
+  margin-top: 32px;
+  border-top: 1px solid var(--border);
+}
+
+.references .eyebrow {
+  margin-bottom: 14px;
+}
+
+.references h2 {
+  font-size: 26px;
+  margin-bottom: 16px;
+}
+
+.references > p {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.reference-list {
+  list-style: none;
+  counter-reset: ref;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 28px;
+  margin: 25px 0 0;
+  padding: 0;
+}
+
+.reference-list li {
+  counter-increment: ref;
+  position: relative;
+  padding: 16px 0 16px 30px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reference-list li::before {
+  content: '[' counter(ref) ']';
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  position: absolute;
+  left: 0;
+  top: 18px;
+}
+
+.reference-list a {
+  display: block;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.7;
+  font-weight: 550;
+}
+
+.reference-list a span {
+  color: var(--accent);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.reference-list small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 48px;
+  padding: 24px 0 32px;
+  border-top: 1px solid var(--border);
+}
+
+.site-footer strong {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1.3px;
+}
+
+.site-footer span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.site-footer a {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 120;
+  max-width: 250px;
+  pointer-events: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.75;
+  font-family: var(--mono);
+}
+
+.tooltip strong {
+  display: block;
+  color: var(--accent-strong);
+  margin-bottom: 4px;
+}
+
+.noscript {
+  background: var(--accent-soft);
+  color: var(--ink);
+  padding: 15px;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  font-size: 13px;
+  z-index: 200;
+}
+
+/* Diagram appearance; SVG geometry and interaction remain in blog.js. */
+.diagram-title {
+  font-size: 12px;
+  fill: var(--ink);
+  font-weight: 600;
+}
+
+.diagram-label {
+  font-size: 10px;
+  fill: var(--ink-2);
+}
+
+.diagram-small {
+  font-size: 9px;
+  fill: var(--muted);
+}
+
+.diagram-mono {
+  font-family: var(--mono);
+}
+
+.diagram-node {
+  fill: var(--panel-2);
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.diagram-node.active {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.diagram-edge {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  opacity: .65;
+}
+
+.diagram-edge.active {
+  stroke: var(--accent);
+  stroke-width: 2.3;
+  opacity: 1;
+}
+
+.diagram-caption {
+  font-size: 10px;
+  fill: var(--accent-strong);
+  font-weight: 500;
+}
+
+.diagram-memory {
+  fill: color-mix(in srgb, var(--orange) 12%, var(--panel));
+  stroke: var(--orange);
+  stroke-width: 1;
+}
+
+.diagram-memory.active {
+  stroke-width: 1.8;
+}
+
+.future {
+  opacity: .19;
+}
+
+.trace-panel .axis {
+  fill: var(--trace-ink);
+  font-size: 9px;
+  font-family: var(--mono);
+}
+
+.trace-panel .grid {
+  stroke: var(--trace-grid);
+  stroke-width: 1;
+}
+
+.trace-panel .track-label {
+  font-size: 10px;
+  fill: #bbcfdf;
+  font-family: var(--mono);
+}
+
+.trace-panel .block-label {
+  font-size: 8px;
+  fill: #fff;
+  font-family: var(--mono);
+}
+
+.trace-panel .phase-label {
+  fill: #84c8b8;
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.scene-enter {
+  animation: scene-enter .26s ease-out both;
+}
+
+.flow-active {
+  stroke-dasharray: 5 4;
+  animation: flow-once .4s ease-out 1;
+}
+
+@keyframes scene-enter {
+  from {
+    opacity: .55;
+    transform: translateY(3px);
   }
-  .hero-results a { padding: 14px 24px 14px 0; }
-  .hero-results a + a { border-inline-start: 0; border-block-start: 1px solid var(--border); }
-  .hero-results a::after { content: '↗'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: var(--accent-strong); }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-@container (max-width: 500px) {
-  .hero-grid { gap: 20px; }
-  .hero-results { grid-template-columns: 1fr; }
-  .hero-results a { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 12px; padding: 11px 2px; }
-  .hero-results a + a { border-inline-start: 0; border-block-start: 1px solid var(--border); }
-  .hero-results small, .hero-results a > span { grid-column: 1; }
-  .hero-results strong { grid-column: 2; grid-row: 1 / span 2; font-size: 26px; }
+
+@keyframes flow-once {
+  from {
+    stroke-dashoffset: 24;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Below the two-column budget, center the article and use the contents drawer. */
+@media (max-width:1119px) {
+  .article-shell {
+    grid-template-columns: minmax(0, 1fr);
+    width: min(calc(100% - 3rem), var(--reading-width));
+    padding-top: calc(var(--header-height) + 2.5rem);
+  }
+
+  .mobile-menu {
+    display: grid;
+  }
+
+  .toc {
+    position: fixed;
+    inset: var(--header-height) 0 0 auto;
+    z-index: 89;
+    display: none;
+    width: min(320px, calc(100% - 40px));
+    max-height: none;
+    padding: 24px 20px;
+    border-inline-start: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .toc.menu-open {
+    display: flex;
+  }
+
+  .toc nav a {
+    padding-block: 8px;
+    font-size: 13px;
+  }
+
+  .toc nav .toc-sub {
+    font-size: 12px;
+  }
+
+  .toc-bottom {
+    margin-top: auto;
+    padding-top: 14px;
+  }
+
+  .toc-scrim:not([hidden]) {
+    position: fixed;
+    inset: var(--header-height) 0 0;
+    z-index: 88;
+    display: block;
+    background: rgb(0 0 0 / 35%);
+  }
+}
+
+/* Phone typography and locally scrollable, readable diagrams. */
+@media (max-width:650px) {
+  /* Design tokens and the shared 800px reading track. */
+  :root {
+    --header-height: 3.75rem;
+  }
+
+  .article-shell {
+    width: calc(100% - 2.25rem);
+    padding-top: calc(var(--header-height) + 2rem);
+  }
+
+  .site-header {
+    padding-inline: 18px;
+  }
+
+  .wordmark {
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .wordmark-divider, .wordmark-sub {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    font-size: 14px;
+  }
+
+  .header-actions {
+    gap: 10px;
+  }
+
+  .header-link {
+    font-size: 11px;
+  }
+
+  .icon-button {
+    width: 30px;
+    height: 30px;
+    font-size: 17px;
+  }
+
+  /* Compact article opening and linked performance summaries. */
+  .hero {
+    padding-bottom: 24px;
+  }
+
+  .hero-grid {
+    gap: 24px;
+  }
+
+  .hero h1 {
+    font-size: clamp(34px, 8.8vw, 44px);
+    letter-spacing: -1.2px;
+  }
+
+  .hero-subtitle {
+    margin: 14px 0 16px;
+    font-size: 21px;
+    line-height: 1.4;
+  }
+
+  .hero-deck {
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .hero .eyebrow {
+    gap: 8px;
+    margin-bottom: 16px;
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+
+  .eyebrow-line {
+    width: 24px;
+  }
+
+  .hero-meta {
+    gap: 9px;
+    margin-block: 16px;
+    font-size: 10px;
+  }
+
+  .repo-card {
+    gap: 10px;
+    margin-top: 18px;
+    padding-block: 12px;
+  }
+
+  .repo-card strong, .repo-card small {
+    font-size: 10px;
+  }
+
+  .repo-symbol {
+    font-size: 22px;
+  }
+
+  .hero-results {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-results a {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3px 12px;
+    padding: 12px 0;
+  }
+
+  .hero-results a:first-child {
+    padding-top: 0;
+  }
+
+  .hero-results a + a {
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .hero-results small, .hero-results a > span {
+    grid-column: 1;
+  }
+
+  .hero-results small {
+    font-size: 9px;
+  }
+
+  .hero-results strong {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    font-size: 27px;
+  }
+
+  .hero-results a > span {
+    font-size: 11px;
+  }
+
+  .prose p, .details-body .prose p, .experiment-body p {
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  .chapter-map {
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin-block: 24px;
+  }
+
+  .chapter-map a {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 2px 12px;
+    padding-block: 12px;
+    border-bottom: 0;
+  }
+
+  .chapter-map a:last-child {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .chapter-map .map-num {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 9px;
+  }
+
+  .chapter-map .map-glyph {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: center;
+    margin: 0;
+    font-size: 8px;
+  }
+
+  .chapter-map strong, .chapter-map a > span:last-child {
+    grid-column: 2;
+  }
+
+  .chapter-map a > span:last-child {
+    margin: 0;
+  }
+
+  /* Section headings remain on the same edge as the body text. */
+  .chapter {
+    margin-top: 40px;
+    padding-top: 36px;
+  }
+
+  .chapter-heading {
+    margin-bottom: 26px;
+  }
+
+  .chapter-heading .eyebrow {
+    font-size: 9px;
+    letter-spacing: .6px;
+  }
+
+  .chapter-heading h2 {
+    font-size: 27px;
+    letter-spacing: -.5px;
+  }
+
+  h3, .details-body h3 {
+    margin-top: 28px;
+    font-size: 22px;
+  }
+
+  /* Equations and the folded pipeline topology. */
+  .equation {
+    margin-block: 22px;
+    padding: 18px 12px;
+  }
+
+  .equation > span {
+    font-size: 19px;
+  }
+
+  .equation.compact > span {
+    font-size: 17px;
+  }
+
+  .equation small {
+    font-size: 11px;
+  }
+
+  .topology {
+    padding: 14px 8px;
+  }
+
+  .topology-row {
+    gap: 4px;
+  }
+
+  .topology-row > span {
+    padding: 10px 2px;
+    font-size: 8px;
+    line-height: 1.8;
+  }
+
+  .topology-row b {
+    font-size: 8px;
+  }
+
+  .topology-row i {
+    font-size: 12px;
+  }
+
+  .fold-arrow {
+    padding-right: 3px;
+    font-size: 10px;
+  }
+
+  figure {
+    margin: 28px 0 34px;
+  }
+
+  .figure-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .figure-header h4 {
+    font-size: 17px;
+  }
+
+  .figure-kicker {
+    margin-bottom: 5px;
+    font-size: 9px;
+    letter-spacing: .8px;
+  }
+
+  .figure-tag {
+    font-size: 9px;
+  }
+
+  .figure-controls {
+    gap: 10px 14px;
+  }
+
+  .figure-controls label {
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .figure-controls select {
+    max-width: 250px;
+    font-size: 11px;
+  }
+
+  .control-hint {
+    font-size: 9px;
+  }
+
+  .stepper {
+    gap: 5px;
+    padding-bottom: 14px;
+  }
+
+  .stepper button {
+    gap: 5px;
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+
+  .stepper .step-num {
+    font-size: 9px;
+  }
+
+  .svg-scroll:not(#load-chart) svg {
+    min-width: 680px;
+  }
+
+  #load-chart svg {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .trace-title {
+    padding: 10px 12px 4px;
+    font-size: 10px;
+  }
+
+  .trace-title b {
+    font-size: 11px;
+  }
+
+  .trace-title > span:last-child {
+    font-size: 9px;
+  }
+
+  .figure-legend {
+    gap: 8px 14px;
+    font-size: 10px;
+  }
+
+  .figure-explanation {
+    padding-block: 14px;
+    font-size: 13px;
+  }
+
+  .figure-explanation .ex-label {
+    font-size: 9px;
+  }
+
+  .figure-metrics > div {
+    padding-inline: 9px;
+  }
+
+  .figure-metrics small {
+    font-size: 10px;
+    overflow-wrap: normal;
+  }
+
+  .figure-metrics strong {
+    font-size: 16px;
+  }
+
+  .figure-metrics strong em {
+    margin-left: 2px;
+    font-size: 9px;
+  }
+
+  .figure-metrics span {
+    display: block;
+    font-size: 10px;
+    line-height: 1.6;
+    overflow-wrap: normal;
+  }
+
+  figcaption {
+    font-size: 11px;
+    line-height: 1.75;
+  }
+
+  .segmented button {
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  .benchmark-bars {
+    padding-top: 6px;
+  }
+
+  .bench-row-title {
+    font-size: 12px;
+  }
+
+  .bench-gain {
+    font-size: 11px;
+  }
+
+  .barline {
+    grid-template-columns: 43px minmax(0, 1fr) 80px;
+    gap: 7px;
+    font-size: 10px;
+  }
+
+  .barvalue {
+    font-size: 10px;
+  }
+
+  .deep-dive > summary, .experiment > summary {
+    gap: 9px;
+    padding-block: 16px;
+  }
+
+  summary strong {
+    font-size: 14px;
+  }
+
+  summary small {
+    font-size: 11px;
+  }
+
+  .detail-badge {
+    display: none;
+  }
+
+  .config-grid {
+    gap: 0 16px;
+  }
+
+  .config-grid small {
+    font-size: 10px;
+  }
+
+  .config-grid strong {
+    font-size: 11px;
+  }
+
+  th {
+    padding: 9px 10px;
+    font-size: 10px;
+  }
+
+  td {
+    padding: 10px;
+    font-size: 11px;
+  }
+
+  .code-heading {
+    padding: 8px 12px;
+    font-size: 9px;
+  }
+
+  pre code {
+    padding: 14px 12px;
+    font-size: 11px;
+  }
+
+  /* Supporting comparisons and data summaries. */
+  .strategy-cards {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .strategy-cards p {
+    font-size: 14px;
+  }
+
+  .strategy-tokens {
+    font-size: 10px;
+  }
+
+  .credit-row {
+    gap: 8px;
+  }
+
+  .credit {
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .credit strong {
+    font-size: 10px;
+  }
+
+  .fusion-result-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding-bottom: 20px;
+  }
+
+  .fusion-result-grid > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 3px 10px;
+    padding-block: 14px;
+  }
+
+  .fusion-result-grid small {
+    font-size: 10px;
+  }
+
+  .fusion-result-grid strong {
+    margin: 0;
+    font-size: 27px;
+  }
+
+  .fusion-result-grid > div > span {
+    grid-column: 1 / -1;
+    font-size: 11px;
+  }
+
+  /* Closing text, sources, and article footer. */
+  .closing {
+    margin-top: 44px;
+    padding-top: 36px;
+  }
+
+  .closing h2 {
+    font-size: 27px;
+  }
+
+  .closing .closing-line {
+    font-size: 18px;
+  }
+
+  .closing-repo {
+    gap: 16px;
+    font-size: 13px;
+  }
+
+  .references {
+    margin-top: 24px;
+    padding-top: 32px;
+  }
+
+  .references h2 {
+    font-size: 24px;
+  }
+
+  .references > p {
+    font-size: 12px;
+  }
+
+  .reference-list {
+    grid-template-columns: 1fr;
+    margin-top: 20px;
+  }
+
+  .reference-list a {
+    font-size: 12px;
+  }
+
+  .site-footer {
+    margin-top: 32px;
+    padding-bottom: 24px;
+  }
+
+  .site-footer strong {
+    font-size: 9px;
+  }
+
+  .site-footer span {
+    font-size: 10px;
+  }
+
+  .site-footer a {
+    font-size: 11px;
+  }
+}
+
+@media (max-width:359px) {
+  .header-actions {
+    gap: 7px;
+  }
+
+  .wordmark {
+    gap: 7px;
+    font-size: 10px;
+  }
+
+  .hero-results strong {
+    font-size: 24px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media print {
+  :root, :root[data-theme=dark] {
+    color-scheme: light;
+    --bg: #fff;
+    --panel: #fff;
+    --panel-2: #f5f7f9;
+    --ink: #000;
+    --ink-2: #222;
+    --muted: #555;
+    --border: #ccc;
+    --accent: #006b65;
+    --accent-strong: #006b65;
+    --accent-soft: #eaf6f3;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 11pt;
+  }
+
+  .site-header,
+  .toc,
+  .toc-scrim,
+  .reading-progress,
+  .figure-controls,
+  .stepper,
+  .segmented,
+  .tooltip,
+  .skip-link {
+    display: none !important;
+  }
+
+  .article-shell {
+    display: block;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  #article {
+    width: 100%;
+  }
+
+  .hero h1 {
+    font-size: 36px;
+  }
+
+  .hero-results strong {
+    font-size: 26px;
+  }
+
+  /* Section headings remain on the same edge as the body text. */
+  .chapter {
+    margin-top: 20px;
+    padding-top: 15px;
+    break-before: page;
+  }
+
+  figure {
+    break-inside: avoid-page;
+  }
+
+  .reference-list {
+    grid-template-columns: 1fr;
+  }
+
+  .trace-panel {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .svg-scroll {
+    overflow: visible;
+  }
+
+  .svg-scroll svg {
+    min-width: 0;
+  }
+
+  /* Expanded implementation sections preserve the reading edges at every depth. */
+  .deep-dive {
+    break-inside: auto;
+  }
+
+  .details-body, .experiment-body {
+    display: block !important;
+  }
+
+  a {
+    color: #000;
+  }
+
+  figcaption {
+    font-size: 9px;
+  }
 }
 </style>
 </head><body><a class="skip-link" href="#article">Skip to article</a>
@@ -125,34 +2721,9 @@
   <a class="wordmark" href="#top"><span class="brand-mark" aria-hidden="true">N</span><span>NICKO<span class="wordmark-divider"> / </span><span class="wordmark-sub">SYSTEMS</span></span></a>
   <div class="header-actions"><a id="language-switch" class="header-link" href="zh-CN.html" lang="zh-CN" hreflang="zh-CN" rel="alternate">中文</a><a class="header-link" href="https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a><button id="theme-toggle" class="icon-button" aria-label="Toggle dark mode" title="Toggle light and dark mode"><span id="theme-icon" aria-hidden="true">☾</span></button><button id="menu-toggle" class="icon-button mobile-menu" aria-label="Open contents" aria-expanded="false" aria-controls="toc">☰</button></div>
 </header>
-<aside class="toc" id="toc" aria-label="Article contents">
-  <div class="toc-heading">ON THIS PAGE<span id="read-percent">0%</span></div>
-  <nav>
-    <a href="#intro" class="toc-main">Inference at three scales</a>
-    <a href="#prefill" class="toc-chapter"><span>01</span> Prefill · Across GPUs</a>
-    <a href="#prefill-cost" class="toc-sub">Why later chunks cost more</a>
-    <a href="#prefill-fold" class="toc-sub">Folded VPP</a>
-    <a href="#pipeline-figure" class="toc-sub">PP / VPP timelines</a>
-    <a href="#prefill-results" class="toc-sub">Long-context performance</a>
-    <a href="#vpp-implementation" class="toc-sub" data-expand>Inside a rank</a>
-    <a href="#decode" class="toc-chapter"><span>02</span> Decode · Across CTAs</a>
-    <a href="#decode-load" class="toc-sub">Uneven request workloads</a>
-    <a href="#split-strategies" class="toc-sub">From Split-KV to buckets</a>
-    <a href="#bucket-figure" class="toc-sub">Explore assignment and execution</a>
-    <a href="#decode-results" class="toc-sub">Model and serving results</a>
-    <a href="#decode-implementation" class="toc-sub" data-expand>Partials and final reduction</a>
-    <a href="#fusion" class="toc-chapter"><span>03</span> Fusion · Across kernels</a>
-    <a href="#fusion-norm" class="toc-sub">Residual / Norm / FP4</a>
-    <a href="#fusion-front" class="toc-sub">QK / RoPE / KV append</a>
-    <a href="#fusion-tail" class="toc-sub">Attention / Gate / FP8</a>
-    <a href="#fusion-results" class="toc-sub">From operators to full calls</a>
-    <a href="#closing" class="toc-main">Connecting the three scales</a>
-    <a href="#references" class="toc-main">Sources and implementation</a>
-  </nav>
-  <div class="toc-bottom"><span class="dot"></span> SM120 · RTX 5090<br><span class="muted">Qwen3.8 · NVFP4 · vLLM</span></div>
-</aside>
 <div id="toc-scrim" class="toc-scrim" hidden></div>
-<main id="article">
+<div class="article-shell">
+<main id="article" tabindex="-1">
   <section class="hero" id="top">
     <div class="hero-grid">
       <div class="hero-copy">
@@ -202,7 +2773,7 @@
       <p>The scheduling unit also shrinks from 16 layers to 8. Each GPU keeps one compute stream and executes its two model segments serially in local order; different GPUs continue in parallel. The initial forward budgets are <strong>7 / 5 / 3 / 1</strong>, after which forward and return work naturally alternate.<a class="ref" href="#ref-9">[9]</a></p>
     </div>
 
-    <figure class="interactive wide" id="pipeline-figure" data-widget="pipeline">
+    <figure class="interactive" id="pipeline-figure" data-widget="pipeline">
       <div class="figure-header"><div><div class="figure-kicker">FIG. 01–02 / SCHEDULE EXPLORER</div><h4>The same work, two pipelines</h4></div><span class="figure-tag">Cost model</span></div>
       <div class="figure-controls"><label>Chunks <select id="pipe-count"><option value="8">8</option><option value="16" selected>16</option><option value="24">24</option></select></label><label>Context cost <select id="pipe-growth"><option value="0">Equal cost</option><option value="0.12" selected>Growing cost</option><option value="0.24">Stronger history term</option></select></label><label>Track chunk <select id="pipe-highlight"><option value="-1">All</option></select></label></div>
       <div class="stepper" id="pipe-steps" role="group" aria-label="Select a pipeline phase"></div>
@@ -217,7 +2788,7 @@
       <h3>From modeled timelines to four-GPU measurements</h3>
       <p>A full prefill bank contains four requests, each generating one token. Across 8K–128K inputs, the best VPP configurations reduce bank latency by <strong>4.47%–8.55%</strong>; at 32K, runtime falls from <strong>4.304 s to 3.936 s</strong>.<a class="ref" href="#ref-8">[8]</a></p>
     </div>
-    <figure class="data-figure wide"><div class="figure-header"><div><div class="figure-kicker">MEASURED / PREFILL P+1</div><h4>Full-bank latency for long-context prefill</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="Prefill chart units"><button data-value="relative" aria-pressed="true">Relative time</button><button data-value="absolute" aria-pressed="false">Absolute time</button></div></div><div id="prefill-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP1/PP4 · Best configuration from each method's sweep at each input length · Median of three timed banks. <a href="#ref-8">Data source ↗</a></figcaption></figure>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / PREFILL P+1</div><h4>Full-bank latency for long-context prefill</h4></div><div class="segmented" id="prefill-metric" role="group" aria-label="Prefill chart units"><button data-value="relative" aria-pressed="true">Relative time</button><button data-value="absolute" aria-pressed="false">Absolute time</button></div></div><div id="prefill-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP1/PP4 · Best configuration from each method's sweep at each input length · Median of three timed banks. <a href="#ref-8">Data source ↗</a></figcaption></figure>
     <div class="prose"><p>The gain depends on having work in flight. Four requests supply enough chunks to interleave; with only one 8K request, CPP and VPP take 304.6 ms and 311.0 ms, respectively. As the number of requests and context length grow, VPP's reorganization of filling and draining begins to pay off.</p></div>
 
     <details class="deep-dive" id="vpp-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: connecting compute and communication within a rank</strong><small>Shared buffers · CUDA streams · Segmented DMA · vLLM integration</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
@@ -252,17 +2823,17 @@
   <section class="chapter" id="decode">
     <div class="chapter-heading"><div class="chapter-number">02</div><div><div class="eyebrow">DECODE / KV WORK PARTITIONING</div><h2>Assigning CTAs by KV workload</h2></div></div>
     <div class="prose" id="decode-load"><h3>One output token, tens of times more work</h3><p>Decode queries are short: each request advances by just one token. Attention mainly reads historical KV and performs QK, softmax, and PV. Within the same layer and head shape, KV length is a direct measure of work.</p><p>In this Qwen3.8 NVFP4 TP4 deployment, each GPU's full-attention shard has 6 Q heads, 1 KV head, and head dimension 256. Native FlashInfer XQA organizes Split-KV parallelism for requests. When one request approaches 128K and the others are 4K, assigning the same split count to every request creates markedly uneven CTA workloads.<a class="ref" href="#ref-6">[6]</a><a class="ref" href="#ref-7">[7]</a></p><p>Consider B32 with a budget of 170 CTAs: about 5 splits per request. The long request has 511 tiles of 256 tokens, so its heaviest CTA processes 103 tiles. A short request has only 16 tiles, with about 4 in its heaviest split. After most CTAs finish, a few long splits remain on attention's critical path.</p></div>
-    <figure class="interactive wide" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 05 / CTA WORKLOAD</div><h4>Plotting the work assigned to each CTA</h4></div><span class="figure-tag">KV Tiles / CTA</span></div><div class="figure-controls"><label>Request distribution <select id="load-preset"><option value="skew32">B32 · 130816 + 31 × 4096</option><option value="skew9">B9 · 130816 + 8 × 4096 (16 rows)</option><option value="uniform">B32 · All 8064</option></select></label><span class="control-hint">170-CTA budget · 256 tokens per tile</span></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>Modeled workloads: bar height is the number of assigned KV tiles. Top: uniform split counts. Bottom: the current bucket formula. The CTA budget matches the device's SM count.</figcaption></figure>
+    <figure class="interactive" id="load-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 05 / CTA WORKLOAD</div><h4>Plotting the work assigned to each CTA</h4></div><span class="figure-tag">KV Tiles / CTA</span></div><div class="figure-controls"><label>Request distribution <select id="load-preset"><option value="skew32">B32 · 130816 + 31 × 4096</option><option value="skew9">B9 · 130816 + 8 × 4096 (16 rows)</option><option value="uniform">B32 · All 8064</option></select></label><span class="control-hint">170-CTA budget · 256 tokens per tile</span></div><div id="load-chart" class="svg-scroll"></div><div id="load-metrics" class="figure-metrics"></div><div class="figure-explanation" id="load-explanation" aria-live="polite"></div><figcaption>Modeled workloads: bar height is the number of assigned KV tiles. Top: uniform split counts. Bottom: the current bucket formula. The CTA budget matches the device's SM count.</figcaption></figure>
     <div class="prose" id="split-strategies"><h3>Split-KV addresses the same problem, with a different grouping of work</h3><p>FlashAttention-3's variable-length Split-KV path first totals Q/KV work across the batch, estimates a suitable workload per split, and then computes each request's split count. Long requests receive more splits and short requests fewer. Each split handles a contiguous KV range within one request, writes a partial output and LogSumExp, and is later merged by a combine kernel.<a class="ref" href="#ref-4">[4]</a></p><p>FlashAttention-4's SM100/SM103 Split-KV path also provides per-request split metadata, factoring query/head parallelism, KV length, and hardware capacity into configuration. Scheduling strategies such as LPT further order work so heavier items run earlier. These designs address the same question: how can the current batch's attention workload use the GPU more fully?<a class="ref" href="#ref-5">[5]</a><a class="ref" href="#ref-14">[14]</a></p><p>Tencent HPC-Ops takes a more explicitly batch-wide approach: concatenate requests' KV work onto one axis, then partition it by the CTA budget. After finishing one request's tail, a bucket can continue with the next request's beginning. This is the approach adapted here: <strong>use HPC-Ops global KV partitioning with FlashInfer XQA as the NVFP4 compute body on SM120.</strong><a class="ref" href="#ref-3">[3]</a><a class="ref" href="#ref-15">[15]</a></p>
       <div class="strategy-cards"><div><small>ADAPTIVE SPLIT-KV</small><strong>Choose a split count for each request</strong><p>Compute split counts from lengths; each split handles one KV range within its request.</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="r0">R0</span><span class="r1">R1</span></div></div><div><small>GLOBAL KV BUCKET</small><strong>Choose a workload for each CTA</strong><p>Fill balanced buckets across request boundaries; one CTA may execute several tasks in sequence.</p><div class="strategy-tokens"><span class="r0">R0</span><span class="r0">R0</span><span class="mixed">R0 / R1</span><span class="r1">R1</span></div></div></div>
       <h3>Tile, task, bucket: three units, one execution path</h3><p>This XQA adaptation uses <strong>256 KV tokens</strong> per tile. A task is a contiguous tile range within one request; a bucket collects the tasks assigned to one CTA. For request <i>i</i>, first compute <i>n<sub>i</sub> = ⌈L<sub>i</sub>/256⌉</i>, then derive the budget per bucket:</p>
       <div class="equation"><span>B = max<span class="paren">(</span>2, ⌈<span class="fraction"><span>Σ<sub>i</sub> n<sub>i</sub></span><span>N<sub>CTA</sub></span></span>⌉<span class="paren">)</span><small>Fill buckets with requests' tiles in order, creating a new task at each request boundary.</small></div>
       <p>In the B32 example above, the total workload is <i>511 + 31 × 16 = 1007</i> tiles, giving a bucket budget of 6. The long request is spread across more CTAs, and a short request's boundary can share a bucket with its neighbor. A GPU assign kernel generates the mapping once per decode step; compatible full-attention layers reuse it.<a class="ref" href="#ref-7">[7]</a></p>
     </div>
-    <figure class="interactive wide" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 06 / ASSIGN → COMPUTE</div><h4>From requests to CTA work, step by step</h4></div><span class="figure-tag">Runtime task tables</span></div><div class="figure-controls"><label>Example <select id="bucket-preset"><option value="teaching">4 requests / 8 CTAs · 9, 3, 2, 1 tiles</option><option value="real">B32 / 170 CTA · 128K + 31 × 4K</option></select></label><label>Track CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="Select a bucketing phase"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>Inspect the current task table</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>Tasks are described by (request, begin_tile, end_tile, stride). A bucket references a contiguous range in the task table; each task retains its request identity and partial-output location.</figcaption></figure>
+    <figure class="interactive" id="bucket-figure"><div class="figure-header"><div><div class="figure-kicker">FIG. 06 / ASSIGN → COMPUTE</div><h4>From requests to CTA work, step by step</h4></div><span class="figure-tag">Runtime task tables</span></div><div class="figure-controls"><label>Example <select id="bucket-preset"><option value="teaching">4 requests / 8 CTAs · 9, 3, 2, 1 tiles</option><option value="real">B32 / 170 CTA · 128K + 31 × 4K</option></select></label><label>Track CTA <select id="bucket-selected"></select></label></div><div class="stepper" id="bucket-steps" role="group" aria-label="Select a bucketing phase"></div><div id="bucket-diagram" class="svg-scroll"></div><div id="bucket-stats" class="figure-metrics"></div><div id="bucket-explanation" class="figure-explanation" aria-live="polite"></div><details class="mini-detail"><summary>Inspect the current task table</summary><div id="bucket-task-table" class="table-wrap task-table"></div></details><figcaption>Tasks are described by (request, begin_tile, end_tile, stride). A bucket references a contiguous range in the task table; each task retains its request identity and partial-output location.</figcaption></figure>
     <div class="prose"><p>Compute launches a fixed-size CTA grid. Each CTA reads its bucket and executes the tasks in sequence. A task iterates over its KV tiles, updates online softmax state, and writes one partial result when done. At a request boundary, the CTA reuses its compute resources and initializes fresh state for the next task.</p><p>This preserves XQA's KV loading, QK/PV, and softmax dataflow while shifting from a fixed split count per request to an approximately equal workload per CTA. Bucketing changes work organization across the GPU; XQA's established kernel still performs the attention arithmetic.</p></div>
     <div class="prose" id="decode-results"><h3>The largest gains come from mixed request lengths</h3><p>In full-model decode steps, the B9 mixed-length workload falls from <strong>20.04 ms to 14.37 ms</strong>; B32 falls from <strong>28.63 ms to 18.16 ms</strong>, reducing latency by 28.28% and 36.55%, respectively. For uniform B32, both paths take about 17.9 ms. The more skewed the workload, the more tail time global assignment can recover.<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure wide"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FULL-MODEL DECODE</div><h4>Spreading the long request's work</h4></div><span class="figure-tag">ms / step ↓</span></div><div id="decode-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP4 · 256 generated tokens per request · Common output window 17–240. <a href="#ref-8">Full results ↗</a></figcaption></figure>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FULL-MODEL DECODE</div><h4>Spreading the long request's work</h4></div><span class="figure-tag">ms / step ↓</span></div><div id="decode-chart" class="benchmark-bars"></div><figcaption>4 × RTX 5090 · TP4 · 256 generated tokens per request · Common output window 17–240. <a href="#ref-8">Full results ↗</a></figcaption></figure>
     <div class="prose"><p>The optimization also reaches the serving path. With mixed-length HTTP arrivals, Bucket increases output throughput by about <strong>10%–11%</strong> over native. The runtime retains Native, Aligned, and Persistent paths and chooses an execution strategy from the request-length distribution: a lightweight path for uniform work, and global buckets for pronounced skew.<a class="ref" href="#ref-8">[8]</a></p></div>
 
     <details class="deep-dive" id="decode-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: task tables, persistent XQA, and the final reduction</strong><small>One mapping reused across layers · One partial per task · Last-CTA merge</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
@@ -298,16 +2869,16 @@ for task in buckets[blockIdx.x]:
     <div class="chapter-heading"><div class="chapter-number">03</div><div><div class="eyebrow">KERNEL FUSION / PRODUCER → CONSUMER</div><h2>Let producers emit what consumers need</h2></div></div>
     <div class="prose"><p>Scheduling keeps compute resources busy; kernel fusion shortens the path to the next operation. In low-precision inference, GEMM and attention impose specific requirements on input layouts, quantized values, and scales. Producing these formats during the upstream writeback eliminates intermediate-tensor VRAM round trips and separate processing boundaries.</p><p>We target three frequent boundaries: residual/RMSNorm before the MLP, QK/RoPE/KV append before attention, and gate/FP8 after attention. All three follow the same principle: <strong>write the result once, already in the consumer's required format.</strong></p></div>
     <div class="prose" id="fusion-norm"><h3><span class="sub-index">3.1</span> Residual + RMSNorm + NVFP4 packing</h3><p>Before the MLP, the input is added to the residual, normalized with Gemma RMSNorm, and quantized to NVFP4. The conventional path materializes a normalized BF16 tensor, which the quantization kernel reads again. The fused path performs the BF16 rounding in registers, directly emits FP4 data and native-layout scales, and still writes the updated residual in BF16.<a class="ref" href="#ref-10">[10]</a></p></div>
-    <figure class="interactive wide fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">FIG. 08 / MLP INPUT</div><h4>Keep the residual, deliver NVFP4 directly</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a Norm fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a Norm dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>FP4 data and group scales feed native NVFP4 GEMM directly; the BF16 residual remains a separate output.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="norm-widget" data-kind="norm"><div class="figure-header"><div><div class="figure-kicker">FIG. 08 / MLP INPUT</div><h4>Keep the residual, deliver NVFP4 directly</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a Norm fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a Norm dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>FP4 data and group scales feed native NVFP4 GEMM directly; the BF16 residual remains a separate output.</figcaption></figure>
     <div class="prose"><p>The kernel operates on one hidden-state row, combining row reduction, group quantization, and scale writes. Hidden width is 5120, with 16 elements per NVFP4 quantization group. Scales are written directly in the swizzled layout required by the downstream GEMM.</p></div>
     <div class="prose" id="fusion-front"><h3><span class="sub-index">3.2</span> QK Norm + RoPE + KV append</h3><p>The attention input boundary offers a similar opportunity. Q and K undergo normalization and rotary position encoding; V follows the quantized append path. Starting from the QKV projection output, the fused kernel directly produces BF16 Q and gate tensors, while using slot mapping to write NVFP4 K/V and their scales into the paged cache.<a class="ref" href="#ref-11">[11]</a></p></div>
-    <figure class="interactive wide fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">FIG. 09 / ATTENTION INPUT</div><h4>Q feeds attention; K/V land directly in cache pages</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a QK fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a QK dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Q and K follow Norm → RoPE; V follows quantized append. Slot mapping determines page addresses, keeping K/V data paired with their scales.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="front-widget" data-kind="front"><div class="figure-header"><div><div class="figure-kicker">FIG. 09 / ATTENTION INPUT</div><h4>Q feeds attention; K/V land directly in cache pages</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose a QK fusion path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a QK dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Q and K follow Norm → RoPE; V follows quantized append. Slot mapping determines page addresses, keeping K/V data paired with their scales.</figcaption></figure>
     <div class="prose"><p>The destination matters: Q feeds attention, while K/V go into already allocated cache pages. Native paging, byte strides, and quantization-scale conventions are preserved, so downstream XQA reads the same data structures.</p></div>
     <div class="prose" id="fusion-tail"><h3><span class="sub-index">3.3</span> Attention output + gate + FP8 quantization</h3><p>The final attention result must still be multiplied by <code>sigmoid(gate)</code> and quantized to the FP8 format required by the output projection. We move this processing into the final-output epilogue: after attention normalization and split reduction, it applies the gate and packs FP8 directly.<a class="ref" href="#ref-12">[12]</a></p></div>
-    <figure class="interactive wide fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">FIG. 10 / ATTENTION OUTPUT</div><h4>From final attention output straight to projection</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose an attention-tail path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a tail dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Partials retain the existing BF16/FP32 merge. The final writer applies the gate and static FP8 quantization, feeding the output projection directly.</figcaption></figure>
+    <figure class="interactive fusion-widget" id="tail-widget" data-kind="tail"><div class="figure-header"><div><div class="figure-kicker">FIG. 10 / ATTENTION OUTPUT</div><h4>From final attention output straight to projection</h4></div><div class="segmented fusion-mode" role="group" aria-label="Choose an attention-tail path"><button data-mode="before" aria-pressed="false">Native path</button><button data-mode="after" aria-pressed="true">Fused path</button></div></div><div class="stepper fusion-steps" role="group" aria-label="Select a tail dataflow phase"></div><div class="fusion-diagram svg-scroll"></div><div class="figure-explanation fusion-explanation" aria-live="polite"></div><figcaption>Partials retain the existing BF16/FP32 merge. The final writer applies the gate and static FP8 quantization, feeding the output projection directly.</figcaption></figure>
     <div class="prose"><p>The single-task path runs this epilogue when writing its output directly; the multi-task path runs it in the final writer of last-CTA merge. Each request's final output is gated and quantized once, while splits retain their existing softmax merge structure.</p></div>
     <div class="prose" id="fusion-results"><h3>Operator savings inside a full decode call</h3><p>Direct operator tests reduce residual/Norm/NVFP4 latency by about <strong>33%–39%</strong> and QK/RoPE/KV-append latency by about <strong>52%–55%</strong>; the attention-tail gain in the complete XQA tail is about <strong>0.7%–1.3%</strong>. With all three fusions enabled, full GPU decode calls across B1/8/16/32 and 1K/2K contexts reduce latency over the same Bucket path by <strong>2.04%–7.18%</strong>.<a class="ref" href="#ref-8">[8]</a></p></div>
-    <figure class="data-figure wide"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FUSION</div><h4>Four measurement scopes</h4></div><span class="figure-tag">Latency reduction</span></div><div class="fusion-result-grid"><div><small>Direct producer</small><strong>33–39<span>%</span></strong><span>Residual / RMSNorm / NVFP4</span></div><div><small>Direct producer</small><strong>52–55<span>%</span></strong><span>QK Norm / RoPE / KV Append</span></div><div><small>Complete XQA tail</small><strong>0.7–1.3<span>%</span></strong><span>Final Output / Gate / FP8</span></div><div class="result-highlight"><small>Full GPU decode · Includes LM head</small><strong>2.04–7.18<span>%</span></strong><span>Three fusions / Same Bucket path</span></div></div><figcaption>Full calls cover B1/8/16/32 × 1K/2K. Native projections, TP reductions, and the LM head retain their existing execution paths.</figcaption></figure>
+    <figure class="data-figure"><div class="figure-header"><div><div class="figure-kicker">MEASURED / FUSION</div><h4>Four measurement scopes</h4></div><span class="figure-tag">Latency reduction</span></div><div class="fusion-result-grid"><div><small>Direct producer</small><strong>33–39<span>%</span></strong><span>Residual / RMSNorm / NVFP4</span></div><div><small>Direct producer</small><strong>52–55<span>%</span></strong><span>QK Norm / RoPE / KV Append</span></div><div><small>Complete XQA tail</small><strong>0.7–1.3<span>%</span></strong><span>Final Output / Gate / FP8</span></div><div class="result-highlight"><small>Full GPU decode · Includes LM head</small><strong>2.04–7.18<span>%</span></strong><span>Three fusions / Same Bucket path</span></div></div><figcaption>Full calls cover B1/8/16/32 × 1K/2K. Native projections, TP reductions, and the LM head retain their existing execution paths.</figcaption></figure>
     <details class="deep-dive" id="fusion-implementation"><summary><span class="detail-icon">＋</span><span><strong>Implementation: numerical formats in the dataflow</strong><small>BF16 boundaries · NVFP4 group scales · Static FP8 · Full serving tests</small></span><span class="detail-badge">IMPLEMENTATION</span></summary><div class="details-body">
       <div class="prose"><h3>The consumer's format defines the fusion interface</h3><p>All three kernels preserve their existing consumers' input contracts. NormPack emits NVFP4 data and swizzled scales; Front emits BF16 Q, BF16 gate, and paged NVFP4 K/V; Tail emits E4M3 FP8 with a static scale. Key normalization and softmax reductions use FP32, while existing BF16 rounding boundaries are preserved in registers.</p>
       <div class="code-block"><div class="code-heading">Three fusion boundaries / pseudocode</div><pre><code># ① Residual / Gemma RMSNorm / NVFP4
@@ -359,6 +2930,33 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   </section>
   <footer class="site-footer"><div><strong>NICKO / SYSTEMS</strong><span>Qwen3.8 27B · SM120 · 2026</span></div><a href="#top">Back to top ↑</a></footer>
 </main>
+<aside class="toc" id="toc" aria-label="Article contents">
+  <div class="toc-heading">ON THIS PAGE<span id="read-percent">0%</span></div>
+  <nav>
+    <a href="#intro" class="toc-main">Inference at three scales</a>
+    <a href="#prefill" class="toc-chapter"><span>01</span> Prefill · Across GPUs</a>
+    <a href="#prefill-cost" class="toc-sub">Why later chunks cost more</a>
+    <a href="#prefill-fold" class="toc-sub">Folded VPP</a>
+    <a href="#pipeline-figure" class="toc-sub">PP / VPP timelines</a>
+    <a href="#prefill-results" class="toc-sub">Long-context performance</a>
+    <a href="#vpp-implementation" class="toc-sub" data-expand>Inside a rank</a>
+    <a href="#decode" class="toc-chapter"><span>02</span> Decode · Across CTAs</a>
+    <a href="#decode-load" class="toc-sub">Uneven request workloads</a>
+    <a href="#split-strategies" class="toc-sub">From Split-KV to buckets</a>
+    <a href="#bucket-figure" class="toc-sub">Explore assignment and execution</a>
+    <a href="#decode-results" class="toc-sub">Model and serving results</a>
+    <a href="#decode-implementation" class="toc-sub" data-expand>Partials and final reduction</a>
+    <a href="#fusion" class="toc-chapter"><span>03</span> Fusion · Across kernels</a>
+    <a href="#fusion-norm" class="toc-sub">Residual / Norm / FP4</a>
+    <a href="#fusion-front" class="toc-sub">QK / RoPE / KV append</a>
+    <a href="#fusion-tail" class="toc-sub">Attention / Gate / FP8</a>
+    <a href="#fusion-results" class="toc-sub">From operators to full calls</a>
+    <a href="#closing" class="toc-main">Connecting the three scales</a>
+    <a href="#references" class="toc-main">Sources and implementation</a>
+  </nav>
+  <div class="toc-bottom"><span class="dot"></span> SM120 · RTX 5090<br><span class="muted">Qwen3.8 · NVFP4 · vLLM</span></div>
+</aside>
+</div>
 <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
 <noscript><div class="noscript">Enable JavaScript for the step-by-step diagrams. The article, experimental results, and references remain readable without it.</div></noscript>
 <script id="benchmark-data" type="application/json">{"prefill":[{"input_tokens":"8192","requests":"4","cpp_ms":"832.413","vpp_ms":"795.197","vpp_chunk_tokens":"2048","vpp_graph":"piecewise"},{"input_tokens":"32768","requests":"4","cpp_ms":"4304.359","vpp_ms":"3936.227","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"65536","requests":"4","cpp_ms":"11647.508","vpp_ms":"10834.357","vpp_chunk_tokens":"4096","vpp_graph":"piecewise"},{"input_tokens":"131071","requests":"4","cpp_ms":"35241.058","vpp_ms":"33410.873","vpp_chunk_tokens":"8192","vpp_graph":"none"}],"decode":[{"batch":"1","context_pattern":"512","native_ms":"10.0577","bucket_ms":"9.7397"},{"batch":"32","context_pattern":"32x8064","native_ms":"17.9077","bucket_ms":"17.9361"},{"batch":"9","context_pattern":"130816+8x4096","native_ms":"20.0353","bucket_ms":"14.3697"},{"batch":"32","context_pattern":"130816+31x4096","native_ms":"28.6256","bucket_ms":"18.1637"}],"http_fusion":[{"bank":"short_c1","native_tokens_per_second":"92.64","bucket_tokens_per_second":"99.00","fused_tokens_per_second":"100.74"},{"bank":"uniform32","native_tokens_per_second":"332.85","bucket_tokens_per_second":"332.53","fused_tokens_per_second":"327.68"},{"bank":"skew16","native_tokens_per_second":"248.03","bucket_tokens_per_second":"255.70","fused_tokens_per_second":"252.99"},{"bank":"skew32","native_tokens_per_second":"226.56","bucket_tokens_per_second":"243.97","fused_tokens_per_second":"241.84"},{"bank":"mixed_2rps","native_tokens_per_second":"448.19","bucket_tokens_per_second":"494.11","fused_tokens_per_second":"495.77"},{"bank":"mixed_8rps","native_tokens_per_second":"452.48","bucket_tokens_per_second":"496.57","fused_tokens_per_second":"497.74"}]}</script><script id="diagram-messages" type="application/json">{"theme.light":"Switch to light mode","theme.dark":"Switch to dark mode","toc.close":"Close contents","toc.open":"Open contents","pipe.start":"Start","pipe.fill":"Fill","pipe.turn":"Turn","pipe.steady":"Interleave","pipe.drain":"Drain","overview":"Overview","pipe.all":"\u003coption value=\"-1\">All\u003c/option>","pipe.finish":"Finish {0} u","pipe.tip":"\u003cstrong>{0} · GPU{1} · C{2}\u003c/strong>Stage {3} · {4}\u003cbr>Prior context: {5}C\u003cbr>Start: {6} u\u003cbr>End: {7} u\u003cbr>Duration: {8} u","pipe.timeline":"{0} compute timeline across four GPUs","pipe.startNote":"C0 starts on GPU0. CPP runs 16 layers per stage and VPP runs eight. Both paths process all 64 layers.","pipe.fillNote":"Each GPU starts as soon as its input arrives. GPU0 keeps admitting chunks. The VPP warmup counts are \u003cstrong>7 / 5 / 3 / 1\u003c/strong>, so inner ranks begin the return leg first.","pipe.turnNote":"C0 reaches GPU3 and moves locally from S3 to S4. Older chunks start the return leg while newer ones move forward. Both legs share the compute stream on each rank.","pipe.steadyNote":"Each GPU alternates between an older chunk on the return leg and a newer chunk on the forward leg. Eight-layer stages let work on the second half of the network start earlier.","pipe.drainNote":"All chunks have entered the pipeline. VPP finishes the remaining return stages. CPP still has to move the last, most expensive chunks through its physical stages.","pipe.uniformNote":"With equal chunk costs, both schedules finish together. Select increasing costs to see how a growing KV history changes pipeline fill and drain.","pipe.growthNote":"In this model CPP finishes at \u003cstrong>{0} u\u003c/strong> and VPP at \u003cstrong>{1} u\u003c/strong>. The amount of compute is the same. Stage size and local execution order determine the difference.","pipe.phase":"Stage {0} / 6","pipe.cppIdle":"CPP idle per GPU","pipe.elapsed":"Average over the full schedule","pipe.vppIdle":"VPP idle per GPU","pipe.equalWork":"Same total compute","pipe.delta":"Modeled time saved","rank.receive":"Receive input","rank.compute":"Run stage","rank.send":"Send output","rank.reuse":"Reuse slots","rank.from0":"From GPU0","rank.from2":"From GPU2","rank.edgeRings":"Per-edge host rings","rank.shared":"Shared by both legs","rank.current":"Slot 0 · current","rank.ahead1":"Slot 1 · prefetch","rank.ahead2":"Slot 2 · prefetch","rank.interleave":"Interleave S1 / S6","rank.sendPrev":"Send prior","rank.writeNext":"Write next","rank.to2":"To GPU2","rank.to0":"To GPU0","rank.progress":"Advance DMA and exchange READY / ACK","rank.capacity":"Fixed buffers at C8192: 2 source + 3 receive slots = 800 MiB","rank.diagram":"GPU1 shared buffers and three CUDA streams","rank.overviewNote":"One compute stream runs both legs on each rank. The legs share two physical source slots and three receive slots. Each edge tracks its own sequence numbers and events.","rank.receiveNote":"The shared H2D stream writes incoming data from both legs to the receive arena. One slot supplies the running stage. The others prefetch admitted forward or return inputs in FIFO order.","rank.computeNote":"The compute stream waits for the matching receive event, runs S1 or S6, and records a consumer event after the stage has finished reading its input.","rank.sendNote":"A stage publishes its output in a source slot. When a captured stage returns separate storage, its output is copied into that slot. D2H can send the prior output while compute uses the other slot. Hidden and residual each have a ready event.","rank.reuseNote":"D2H completion releases the source slot. The consumer event releases the receive slot. The host progress thread advances DMA and reuses each host segment after H2D completes.","dma.ready":"Output ready","dma.d2h":"Queue D2H","dma.h2d":"Queue H2D","dma.pipeline":"Overlap segments","dma.received":"Input ready","dma.release":"Consume and release","dma.outputEvent":"Output event","dma.wait":"Wait → H2D → ACK","dma.diagram":"Segmented DMA events between GPU0 and GPU1","dma.free":"Reusable","dma.held":"Holds C0 output","dma.read":"Chunk read","dma.cycle":"Reuse after H2D","dma.consuming":"Stage reading","dma.writing":"H2D in progress","dma.waiting":"Ready to receive","dma.readyNote":"GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the progress thread can prepare its segments.","dma.d2hNote":"The host queues one segment's D2H copy and its completion event on the send stream, then publishes READY with the event generation the receiver should wait for.","dma.h2dNote":"GPU1 queues \u003cstrong>Wait(D2H event) → H2D → H2D event\u003c/strong>, then publishes ACK. The copy engine starts H2D as soon as the D2H dependency is satisfied.","dma.pipelineNote":"D2H for one segment overlaps H2D for the previous segment. Eight host segments carry the full 160 MiB boundary in turns. Reusing a ring position requires its ACK and H2D completion.","dma.receivedNote":"GPU1 has the full input. Its compute stream passes the receive event and starts S1(C0). GPU0 has released its source slot after D2H, and this chunk has passed through the host ring.","dma.releaseNote":"When S1(C0) finishes reading the input, its consumer event releases the receive slot. Source slots, host segments and receive slots become reusable at different points, each after its last reader finishes.","load.native":"Native uniform split","load.active":"Active CTAs: {0} / 170","load.tasks":"\u003cbr>Tasks: {0}","load.diagram":"KV work across 170 CTAs under native splitting and global bucketing","load.nativeMax":"Heaviest native CTA","load.bucketMax":"Heaviest bucket CTA","load.batch":"Whole batch","load.counts":"{0} tasks · {1} active buckets","load.uniformStart":"With uniform context lengths the native split already balances work. The heaviest CTA in either schedule handles \u003cstrong>","load.uniformEnd":" tiles\u003c/strong>.","load.skewNote":"Native splitting concentrates the long request on a few CTAs. The busiest handles \u003cstrong>{0} tiles\u003c/strong>. Global buckets assign about \u003cstrong>{1} tiles\u003c/strong> each and start a new task wherever a bucket crosses a request boundary.","bucket.requests":"Requests","bucket.pack":"Build buckets","bucket.run":"Execute","bucket.partials":"Write partials","bucket.cost":"KV length sets the workload","bucket.tileSize":"Each tile covers 256 KV tokens","bucket.summary":"{0} tiles total · {1} CTAs available · {2} tiles per bucket","bucket.skew":"B32: one long request and 31 short ones","bucket.tileAxis":"Lay out the KV tiles along one global axis","bucket.budgetTitle":"Common work budget","bucket.budgetCalc":"{0} / 170 → {1} tiles per bucket","bucket.identity":"Keep request identity","bucket.boundary":"Start a new task at each request boundary","bucket.example":"8 buckets, 9 tasks","bucket.select":"170 buckets · Select a CTA to inspect its tasks","bucket.empty":"Empty bucket","bucket.ctaPath":"Each CTA executes its tasks in order within one launch","bucket.order":"Execution order for CTA {0}","bucket.inside":"Inside each task","bucket.readQ":"Load Q for this request","bucket.readTiles":"Traverse its KV tile range","bucket.softmax":"Update the online softmax","bucket.write":"Store the task's partial result","bucket.max":"170 CTAs · at most 6 tiles per CTA","bucket.sequence":"CTA {0} executes in order","bucket.mergeTitle":"Write one partial per task and merge by request","bucket.taskCount":"Tasks: {0}","bucket.byRequest":"Merge per request","bucket.other":"Other requests follow the same partial-to-merge path to their own outputs.","bucket.diagram":"Step through KV tiles, tasks and buckets","bucket.total":"Total KV work","bucket.reqCount":"Requests: {0}","bucket.budget":"Bucket budget","bucket.active":"Active CTAs: {0}","bucket.slots":"Task / partial slots","bucket.count":"Buckets: {0}","bucket.requestsNote":"Read the KV lengths for this batch. Each request keeps its own Q, KV page table and output position.","bucket.tilesNote":"Count tiles in units of 256 tokens, then compute their global prefix offsets. Each tile retains its request ID. KV data stays in the paged cache.","bucket.packNote":"Each bucket has a budget of \u003cstrong>{0} tiles\u003c/strong>. CTA {1} has \u003cstrong>{2} task(s)\u003c/strong>{3}","bucket.cross":" because its range crosses a request boundary.","bucket.same":" within a single request.","bucket.runNote":"A CTA walks its bucket in task order. All tiles in a task share an online softmax accumulator. Finishing the task publishes one partial result.","bucket.mergeNote":"A counter collects partials for each request. The CTA that finishes the last task reads all its partials and writes the final O. A single-task request writes O directly.","bucket.table":"\u003ctable>\u003cthead>\u003ctr>\u003cth>Task\u003c/th>\u003cth>Request\u003c/th>\u003cth>KV tile range\u003c/th>\u003cth>Count\u003c/th>\u003cth>Bucket / CTA\u003c/th>\u003c/tr>\u003c/thead>\u003ctbody>","merge.start":"Start","merge.t2":"T2 done","merge.t0":"T0 done","merge.t4":"T4 done","merge.t3":"T3 done","merge.tasks":"Compute tasks","merge.done":"Done","merge.running":"Running","merge.wait":"Await partial","merge.counter":"Completions","merge.winner":"Performs merge","merge.output":"6 × 256 / final","merge.pending":"Await merge","merge.reweight":"Read 5 partials → reweight by softmax mass","merge.order":"Finish order: T2 → T0 → T4 → T3 → T1","merge.reset":"Write output and reset counter","merge.publish":"Each finisher publishes its own partial","merge.diagram":"Five tasks publish partials in completion order and the last CTA merges them","merge.startNote":"R0 has five tasks on different CTAs. Each has its own scratch slot.","merge.t2Note":"T2 finishes first, stores O₂, m₂ and l₂, then increments the completion count for R0.","merge.t0Note":"T0 finishes. Two partials are ready in scratch while the other tasks keep running.","merge.t4Note":"T4 has finished. T3 and T1 are still running. Completion order determines which CTA will merge the results.","merge.t3Note":"Four partials are ready. The CTA running T1 is finishing the last task.","merge.t1Note":"T1 increments the counter and sees the previous value 4. As the last finisher it reads all five partials, reweights them by softmax mass and writes O_R0.","fusion.readInput":"Read input","fusion.normQuant":"Normalize and pack","fusion.gemm":"Feed GEMM","fusion.readProj":"Read projection","fusion.qkv":"Process Q, K and V","fusion.store":"Write outputs","fusion.final":"Finish attention","fusion.gateQuant":"Gate and quantize","fusion.project":"Feed projection","norm.reducePack":"Row reduction · group-16 pack · scale swizzle","norm.residual":"Updated residual","norm.fp32":"FP32 row reduction","fusion.roundtrip":"VRAM store / load","norm.scale":"Data + scale","norm.layout":"Native MLP layout","norm.registers":"Round the normalized value to BF16 in registers, then pack it into NVFP4.","norm.spill":"Normalization hands BF16 y to the quantizer through device memory.","front.gate":"Includes Q-side gate","front.value":"V: quantize → paged store","front.cache":"Write K/V and scales into place","front.heads":"Per-head Q/K transform","front.key":"Transformed K","front.append":"Paged K/V store","front.valuePath":"V follows the quantize-and-store path","front.query":"Q feeds attention","front.caption":"Q and K pass through normalization and RoPE. V goes directly to quantization and cache append.","tail.stats":"BF16 O · FP32 stats","tail.epilogue":"Final O → BF16 gate → E4M3","tail.compiled":"Compiled epilogue","tail.layout":"Static FP8 input","tail.once":"After the split reduction, the final writer gates and quantizes once.","tail.caption":"The reduction keeps the original partial format. The fused epilogue writes the final output.","fusion.diagram":"{0} operator: {1} data path","fusion.fused":"fused","fusion.native":"native","norm.inputNote":"Read x, the residual and the norm weights. One CTA adds the residual and reduces the sum of squares across a row of 5,120 elements.","norm.fusedNote":"Round the normalized values to BF16 in registers, then form FP4 values and a scale per group of 16. The intermediate BF16 tensor stays off the memory bus.","norm.nativeNote":"Add and RMSNorm produce BF16 y. A separate quantizer reads that tensor and packs it into NVFP4.","norm.outNote":"The kernel writes the \u003cstrong>BF16 residual, packed FP4 values and native-layout scales\u003c/strong>. The MLP GEMM reads the packed input directly.","norm.unfusedOut":"The BF16 residual is retained. A separate quantization stage supplies packed FP4 and scales to the MLP GEMM.","front.inputNote":"Read the QKV projection outputs, positions, slot mapping and quantization scales. The Q side also supplies the gate used after attention.","front.fusedNote":"One kernel applies Gemma norm and RoPE to Q/K. It then quantizes K and V and uses the slot mapping to write both to the cache.","front.nativeNote":"Q and K first undergo their per-head transforms. A subsequent quantize-and-append stage reads K and V and writes their pages.","front.outNote":"Attention receives \u003cstrong>BF16 Q and the gate\u003c/strong>, plus \u003cstrong>NVFP4 K/V and scales\u003c/strong> in the paged cache. It reads the existing page table and native data layout.","tail.inputNote":"A single task produces O directly. With multiple tasks the last CTA merges their partials. At this point the softmax reduction covers the request's full KV range.","tail.fusedNote":"The final writer applies BF16 sigmoid(gate), a BF16 multiply and static FP8 quantization in sequence to produce the projection input.","tail.nativeNote":"Attention stores BF16 O. The native compiled epilogue reads it, applies the gate and quantizes to FP8.","tail.outNote":"The final store writes \u003cstrong>E4M3 FP8\u003c/strong> directly for the output projection. Partial computation and merging keep their existing formats.","tail.unfusedOut":"The epilogue writes the FP8 tensor consumed by the output projection.","chart.prefillRow":"\u003cdiv class=\"bench-row\">\u003cdiv class=\"bench-row-title\">\u003cspan>{0} input tokens / request\u003c/span>\u003cspan class=\"bench-gain\">−{1}%\u003c/span>\u003c/div>{2}{3}\u003c/div>","chart.uniform":"B32 · uniform 8K"}</script>
@@ -403,21 +3001,70 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
 
   // ---------- Reading UI ----------
   const themeBtn=$('#theme-toggle');
-  function setTheme(theme){document.documentElement.dataset.theme=theme;$('#theme-icon').textContent=theme==='dark'?'☼':'☾';themeBtn.setAttribute('aria-label',theme==='dark'?msg('theme.light'):msg('theme.dark'));try{localStorage.setItem('qwen-theme',theme);}catch(e){}$('meta[name=theme-color]').setAttribute('content',theme==='dark'?'#11181f':'#faf9f6');}
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    $('#theme-icon').textContent = theme === 'dark' ? '☼' : '☾';
+    themeBtn.setAttribute('aria-label', msg(theme === 'dark' ? 'theme.light' : 'theme.dark'));
+    $('meta[name=theme-color]').content = getComputedStyle(document.body).backgroundColor;
+    try { localStorage.setItem('qwen-theme', theme); } catch {}
+  }
   setTheme(document.documentElement.dataset.theme);
   themeBtn.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
   const toc=$('#toc'),menu=$('#menu-toggle'),scrim=$('#toc-scrim');
-  function menuState(open){toc.classList.toggle('menu-open',open);menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?msg('toc.close'):msg('toc.open'));scrim.hidden=!open;}
+  function menuState(open, returnFocus = false) {
+    toc.classList.toggle('menu-open', open);
+    menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', msg(open ? 'toc.close' : 'toc.open'));
+    scrim.hidden = !open;
+    $('#article').inert = open;
+    if (open) (toc.querySelector('a.active') || toc.querySelector('a')).focus({preventScroll: true});
+    else if (returnFocus) menu.focus({preventScroll: true});
+  }
   menu.addEventListener('click',()=>menuState(!toc.classList.contains('menu-open')));
-  scrim.addEventListener('click',()=>menuState(false));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'){menuState(false);$('#tooltip').hidden=true;}});
+  scrim.addEventListener('click',()=>menuState(false, true));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (toc.classList.contains('menu-open')) menuState(false, true);
+      $('#tooltip').hidden = true;
+    }
+  });
+  window.addEventListener('resize', () => {
+    if (toc.classList.contains('menu-open') && !menu.getClientRects().length) menuState(false);
+  });
   function openAncestors(target){let n=target;if(n instanceof HTMLDetailsElement)n.open=true;while(n&&n!==document.body){if(n instanceof HTMLDetailsElement)n.open=true;n=n.parentElement;}}
-  document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;const target=document.getElementById(a.getAttribute('href').slice(1));if(target){openAncestors(target);menuState(false);}});
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href^="#"]');
+    if (!link) return;
+    const target = document.getElementById(link.hash.slice(1));
+    if (!target) return;
+    openAncestors(target);
+    if (toc.classList.contains('menu-open')) {
+      menuState(false);
+      target.tabIndex = -1;
+      target.focus({preventScroll: true});
+    }
+  });
   if(location.hash){const target=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(target)openAncestors(target);}
   const tocLinks=$$('#toc nav a');
   const headings=tocLinks.map(a=>({a,el:document.getElementById(a.hash.slice(1))})).filter(x=>x.el);
   let scrolling=false;
-  function scrollUI(){const denom=document.documentElement.scrollHeight-innerHeight;const pct=denom>0?Math.min(100,Math.max(0,scrollY/denom*100)):100;$('#reading-progress').style.width=pct+'%';$('#read-percent').textContent=Math.round(pct)+'%';let current=headings[0];headings.forEach(x=>{if(x.el.getClientRects().length && x.el.getBoundingClientRect().top<160)current=x;});tocLinks.forEach(a=>a.classList.toggle('active',a===current?.a));scrolling=false;}
+  function scrollUI() {
+    const scrollRange = document.documentElement.scrollHeight - innerHeight;
+    const percent = scrollRange > 0 ? Math.min(100, Math.max(0, scrollY / scrollRange * 100)) : 100;
+    $('#reading-progress').style.width = percent + '%';
+    $('#read-percent').textContent = Math.round(percent) + '%';
+    const readingLine = document.querySelector('.site-header').getBoundingClientRect().bottom + 64;
+    let current;
+    for (const item of headings) {
+      if (item.el.getClientRects().length && item.el.getBoundingClientRect().top <= readingLine) current = item.a;
+    }
+    for (const link of tocLinks) {
+      link.classList.toggle('active', link === current);
+      if (link === current) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    }
+    scrolling = false;
+  }
   const languageSwitch = $('#language-switch');
   const otherPage = languageSwitch.getAttribute('href');
   function updateLanguageLink() {
@@ -572,20 +3219,74 @@ write_fp8_e4m3(gated / static_scale)</code></pre></div>
   }
   function nativePlan(lengths,ctas){const counts=lengths.map(n=>Math.ceil(n/256)),max=Math.max(...counts,1);const splits=Math.min(Math.max(1,Math.floor(ctas/lengths.length)),max);const tasks=[];lengths.forEach((_,r)=>{for(let s=0;s<splits;s++)tasks.push({request:r,begin:s,end:counts[r],stride:splits,count:Math.max(0,Math.ceil((counts[r]-s)/splits))});});const loads=Array.from({length:ctas},(_,i)=>tasks[i]?.count||0);return {tasks,loads,splits,active:loads.filter(n=>n>0).length};}
   const presets={skew32:[130816,...Array(31).fill(4096)],skew9:[130816,...Array(8).fill(4096),...Array(7).fill(0)],uniform:Array(32).fill(8064)};
-  let loadPreset='skew32';
-  function renderLoad(animate=false){const lengths=presets[loadPreset],p=taskPlan(lengths,170),n=nativePlan(lengths,170);const max=Math.max(...n.loads,...p.loads),W=960,left=52,pw=877;let a='';
-    [[n,msg('load.native'),48,'#99a9b7'],[p,'Global KV Bucket',217,'var(--accent)']].forEach(([d,name,top,color])=>{
-      a+=tx(left,top-18,name,'diagram-title')+tx(930,top-18,msg('load.active', d.active),'diagram-small diagram-mono','text-anchor="end"');
-      [0,.5,1].forEach(f=>{const y=top+105-105*f;a+=`<line x1="${left}" x2="${left+pw}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 4"/>`+tx(41,y+3,Math.round(max*f),'diagram-small diagram-mono','text-anchor="end"');});
-      d.loads.forEach((v,i)=>{const x=left+i/170*pw,h=v/max*105;const tip=`<strong>CTA ${i} · ${name}</strong>${v} KV Tiles${d===n&&n.tasks[i]?`<br>Request ${n.tasks[i].request} · ${n.splits} Splits / request`:''}${d===p?msg('load.tasks', p.buckets[i].end-p.buckets[i].begin):''}`;a+=rect(x,top+105-h,Math.max(1,pw/170-1),Math.max(v?2:1,h),v?color:'var(--border)','none',1,`data-tip="${esc(tip)}" data-morph="${name}-${i}"`);});
-      [0,40,80,120,169].forEach(i=>a+=tx(left+(i+.5)/170*pw,top+124,i,'diagram-small diagram-mono','text-anchor="middle"'));
-      if(d===p)a+=tx(left+pw/2,top+145,'CTA ID','diagram-small diagram-mono','text-anchor="middle"');
+  const loadChart = $('#load-chart');
+  let loadPreset = 'skew32';
+  let chartWidth = 0;
+
+  function renderLoad(animate = false) {
+    const lengths = presets[loadPreset];
+    const bucket = taskPlan(lengths, 170);
+    const native = nativePlan(lengths, 170);
+    const maxTiles = Math.max(...native.loads, ...bucket.loads);
+    chartWidth = Math.max(1, loadChart.clientWidth);
+    const narrow = chartWidth < 420;
+    const left = 34, right = chartWidth - 16;
+    const plotWidth = Math.max(1, right - left);
+    const plotHeight = narrow ? 72 : 92;
+    const plotTop = narrow ? 44 : 34;
+    const panelHeight = plotTop + plotHeight + 32;
+    let drawing = '';
+
+    const panels = [
+      [native, msg('load.native'), '#899cad'],
+      [bucket, 'Global KV Bucket', 'var(--accent)'],
+    ];
+    panels.forEach(([plan, name, color], panel) => {
+      const origin = panel * panelHeight;
+      const baseline = origin + plotTop + plotHeight;
+      drawing += tx(left, origin + 16, name, 'diagram-title');
+      drawing += tx(narrow ? left : right, origin + (narrow ? 32 : 16),
+        msg('load.active', plan.active), 'diagram-small diagram-mono',
+        narrow ? '' : 'text-anchor="end"');
+      for (const tiles of [0, Math.round(maxTiles / 2), maxTiles]) {
+        const y = baseline - tiles / maxTiles * plotHeight;
+        drawing += `<line x1="${left}" x2="${right}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 4"/>`;
+        drawing += tx(left - 7, y + 3, tiles, 'diagram-small diagram-mono', 'text-anchor="end"');
+      }
+      const pitch = plotWidth / plan.loads.length;
+      plan.loads.forEach((tiles, i) => {
+        const height = tiles / maxTiles * plotHeight;
+        const task = native.tasks[i];
+        let tip = `<strong>CTA ${i} · ${name}</strong>${tiles} KV tiles`;
+        if (plan === native && task) tip += `<br>Request ${task.request} · ${native.splits} splits / request`;
+        if (plan === bucket) tip += msg('load.tasks', bucket.buckets[i].end - bucket.buckets[i].begin);
+        drawing += rect(left + i * pitch, baseline - height, pitch * 0.84, Math.max(1, height),
+          tiles ? color : 'var(--border)', 'none', 0, `data-tip="${esc(tip)}" data-morph="load-${panel}-${i}"`);
+      });
+      for (const index of [0, 40, 80, 120, 169]) {
+        drawing += tx(left + (index + 0.5) * pitch, baseline + 15, index,
+          'diagram-small diagram-mono', 'text-anchor="middle"');
+      }
     });
-    svg('load-chart',a,W,378,msg('load.diagram'),animate);
-    metrics('load-metrics',[[msg('load.nativeMax'),Math.max(...n.loads),'Tiles',`${n.splits} Splits / padded request`],[msg('load.bucketMax'),Math.max(...p.loads),'Tiles',`Budget = ${p.budget}`],[msg('load.batch'),p.total,'Tiles',msg('load.counts', p.tasks.length, p.active)]]);
-    explanation('load-explanation','WORK DISTRIBUTION',loadPreset==='uniform'?msg('load.uniformStart')+Math.max(...n.loads)+msg('load.uniformEnd'):msg('load.skewNote', Math.max(...n.loads), p.budget));
+    drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
+    svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
+    metrics('load-metrics', [
+      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', `${native.splits} splits / padded request`],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', `Budget = ${bucket.budget}`],
+      [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
+    ]);
+    const note = loadPreset === 'uniform'
+      ? msg('load.uniformStart') + maxTiles + msg('load.uniformEnd')
+      : msg('load.skewNote', maxTiles, bucket.budget);
+    $('#load-explanation').innerHTML = note;
   }
-  $('#load-preset').addEventListener('change',e=>{loadPreset=e.target.value;renderLoad(true);});
+  $('#load-preset').addEventListener('change', event => {
+    loadPreset = event.target.value;
+    renderLoad(true);
+  });
+  new ResizeObserver(() => {
+    if (loadChart.clientWidth > 0 && loadChart.clientWidth !== chartWidth) renderLoad();
+  }).observe(loadChart);
 
   // ---------- Bucket step-through ----------
   let bucketState={preset:'teaching',step:2,selected:4};

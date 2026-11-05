@@ -39,21 +39,70 @@
 
   // ---------- Reading UI ----------
   const themeBtn=$('#theme-toggle');
-  function setTheme(theme){document.documentElement.dataset.theme=theme;$('#theme-icon').textContent=theme==='dark'?'☼':'☾';themeBtn.setAttribute('aria-label',theme==='dark'?msg('theme.light'):msg('theme.dark'));try{localStorage.setItem('qwen-theme',theme);}catch(e){}$('meta[name=theme-color]').setAttribute('content',theme==='dark'?'#11181f':'#faf9f6');}
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    $('#theme-icon').textContent = theme === 'dark' ? '☼' : '☾';
+    themeBtn.setAttribute('aria-label', msg(theme === 'dark' ? 'theme.light' : 'theme.dark'));
+    $('meta[name=theme-color]').content = getComputedStyle(document.body).backgroundColor;
+    try { localStorage.setItem('qwen-theme', theme); } catch {}
+  }
   setTheme(document.documentElement.dataset.theme);
   themeBtn.addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));
   const toc=$('#toc'),menu=$('#menu-toggle'),scrim=$('#toc-scrim');
-  function menuState(open){toc.classList.toggle('menu-open',open);menu.setAttribute('aria-expanded',String(open));menu.setAttribute('aria-label',open?msg('toc.close'):msg('toc.open'));scrim.hidden=!open;}
+  function menuState(open, returnFocus = false) {
+    toc.classList.toggle('menu-open', open);
+    menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', msg(open ? 'toc.close' : 'toc.open'));
+    scrim.hidden = !open;
+    $('#article').inert = open;
+    if (open) (toc.querySelector('a.active') || toc.querySelector('a')).focus({preventScroll: true});
+    else if (returnFocus) menu.focus({preventScroll: true});
+  }
   menu.addEventListener('click',()=>menuState(!toc.classList.contains('menu-open')));
-  scrim.addEventListener('click',()=>menuState(false));
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'){menuState(false);$('#tooltip').hidden=true;}});
+  scrim.addEventListener('click',()=>menuState(false, true));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (toc.classList.contains('menu-open')) menuState(false, true);
+      $('#tooltip').hidden = true;
+    }
+  });
+  window.addEventListener('resize', () => {
+    if (toc.classList.contains('menu-open') && !menu.getClientRects().length) menuState(false);
+  });
   function openAncestors(target){let n=target;if(n instanceof HTMLDetailsElement)n.open=true;while(n&&n!==document.body){if(n instanceof HTMLDetailsElement)n.open=true;n=n.parentElement;}}
-  document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;const target=document.getElementById(a.getAttribute('href').slice(1));if(target){openAncestors(target);menuState(false);}});
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href^="#"]');
+    if (!link) return;
+    const target = document.getElementById(link.hash.slice(1));
+    if (!target) return;
+    openAncestors(target);
+    if (toc.classList.contains('menu-open')) {
+      menuState(false);
+      target.tabIndex = -1;
+      target.focus({preventScroll: true});
+    }
+  });
   if(location.hash){const target=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(target)openAncestors(target);}
   const tocLinks=$$('#toc nav a');
   const headings=tocLinks.map(a=>({a,el:document.getElementById(a.hash.slice(1))})).filter(x=>x.el);
   let scrolling=false;
-  function scrollUI(){const denom=document.documentElement.scrollHeight-innerHeight;const pct=denom>0?Math.min(100,Math.max(0,scrollY/denom*100)):100;$('#reading-progress').style.width=pct+'%';$('#read-percent').textContent=Math.round(pct)+'%';let current=headings[0];headings.forEach(x=>{if(x.el.getClientRects().length && x.el.getBoundingClientRect().top<160)current=x;});tocLinks.forEach(a=>a.classList.toggle('active',a===current?.a));scrolling=false;}
+  function scrollUI() {
+    const scrollRange = document.documentElement.scrollHeight - innerHeight;
+    const percent = scrollRange > 0 ? Math.min(100, Math.max(0, scrollY / scrollRange * 100)) : 100;
+    $('#reading-progress').style.width = percent + '%';
+    $('#read-percent').textContent = Math.round(percent) + '%';
+    const readingLine = document.querySelector('.site-header').getBoundingClientRect().bottom + 64;
+    let current;
+    for (const item of headings) {
+      if (item.el.getClientRects().length && item.el.getBoundingClientRect().top <= readingLine) current = item.a;
+    }
+    for (const link of tocLinks) {
+      link.classList.toggle('active', link === current);
+      if (link === current) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    }
+    scrolling = false;
+  }
   const languageSwitch = $('#language-switch');
   const otherPage = languageSwitch.getAttribute('href');
   function updateLanguageLink() {
@@ -208,20 +257,74 @@
   }
   function nativePlan(lengths,ctas){const counts=lengths.map(n=>Math.ceil(n/256)),max=Math.max(...counts,1);const splits=Math.min(Math.max(1,Math.floor(ctas/lengths.length)),max);const tasks=[];lengths.forEach((_,r)=>{for(let s=0;s<splits;s++)tasks.push({request:r,begin:s,end:counts[r],stride:splits,count:Math.max(0,Math.ceil((counts[r]-s)/splits))});});const loads=Array.from({length:ctas},(_,i)=>tasks[i]?.count||0);return {tasks,loads,splits,active:loads.filter(n=>n>0).length};}
   const presets={skew32:[130816,...Array(31).fill(4096)],skew9:[130816,...Array(8).fill(4096),...Array(7).fill(0)],uniform:Array(32).fill(8064)};
-  let loadPreset='skew32';
-  function renderLoad(animate=false){const lengths=presets[loadPreset],p=taskPlan(lengths,170),n=nativePlan(lengths,170);const max=Math.max(...n.loads,...p.loads),W=960,left=52,pw=877;let a='';
-    [[n,msg('load.native'),48,'#99a9b7'],[p,'Global KV Bucket',217,'var(--accent)']].forEach(([d,name,top,color])=>{
-      a+=tx(left,top-18,name,'diagram-title')+tx(930,top-18,msg('load.active', d.active),'diagram-small diagram-mono','text-anchor="end"');
-      [0,.5,1].forEach(f=>{const y=top+105-105*f;a+=`<line x1="${left}" x2="${left+pw}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 4"/>`+tx(41,y+3,Math.round(max*f),'diagram-small diagram-mono','text-anchor="end"');});
-      d.loads.forEach((v,i)=>{const x=left+i/170*pw,h=v/max*105;const tip=`<strong>CTA ${i} · ${name}</strong>${v} KV Tiles${d===n&&n.tasks[i]?`<br>Request ${n.tasks[i].request} · ${n.splits} Splits / request`:''}${d===p?msg('load.tasks', p.buckets[i].end-p.buckets[i].begin):''}`;a+=rect(x,top+105-h,Math.max(1,pw/170-1),Math.max(v?2:1,h),v?color:'var(--border)','none',1,`data-tip="${esc(tip)}" data-morph="${name}-${i}"`);});
-      [0,40,80,120,169].forEach(i=>a+=tx(left+(i+.5)/170*pw,top+124,i,'diagram-small diagram-mono','text-anchor="middle"'));
-      if(d===p)a+=tx(left+pw/2,top+145,'CTA ID','diagram-small diagram-mono','text-anchor="middle"');
+  const loadChart = $('#load-chart');
+  let loadPreset = 'skew32';
+  let chartWidth = 0;
+
+  function renderLoad(animate = false) {
+    const lengths = presets[loadPreset];
+    const bucket = taskPlan(lengths, 170);
+    const native = nativePlan(lengths, 170);
+    const maxTiles = Math.max(...native.loads, ...bucket.loads);
+    chartWidth = Math.max(1, loadChart.clientWidth);
+    const narrow = chartWidth < 420;
+    const left = 34, right = chartWidth - 16;
+    const plotWidth = Math.max(1, right - left);
+    const plotHeight = narrow ? 72 : 92;
+    const plotTop = narrow ? 44 : 34;
+    const panelHeight = plotTop + plotHeight + 32;
+    let drawing = '';
+
+    const panels = [
+      [native, msg('load.native'), '#899cad'],
+      [bucket, 'Global KV Bucket', 'var(--accent)'],
+    ];
+    panels.forEach(([plan, name, color], panel) => {
+      const origin = panel * panelHeight;
+      const baseline = origin + plotTop + plotHeight;
+      drawing += tx(left, origin + 16, name, 'diagram-title');
+      drawing += tx(narrow ? left : right, origin + (narrow ? 32 : 16),
+        msg('load.active', plan.active), 'diagram-small diagram-mono',
+        narrow ? '' : 'text-anchor="end"');
+      for (const tiles of [0, Math.round(maxTiles / 2), maxTiles]) {
+        const y = baseline - tiles / maxTiles * plotHeight;
+        drawing += `<line x1="${left}" x2="${right}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 4"/>`;
+        drawing += tx(left - 7, y + 3, tiles, 'diagram-small diagram-mono', 'text-anchor="end"');
+      }
+      const pitch = plotWidth / plan.loads.length;
+      plan.loads.forEach((tiles, i) => {
+        const height = tiles / maxTiles * plotHeight;
+        const task = native.tasks[i];
+        let tip = `<strong>CTA ${i} · ${name}</strong>${tiles} KV tiles`;
+        if (plan === native && task) tip += `<br>Request ${task.request} · ${native.splits} splits / request`;
+        if (plan === bucket) tip += msg('load.tasks', bucket.buckets[i].end - bucket.buckets[i].begin);
+        drawing += rect(left + i * pitch, baseline - height, pitch * 0.84, Math.max(1, height),
+          tiles ? color : 'var(--border)', 'none', 0, `data-tip="${esc(tip)}" data-morph="load-${panel}-${i}"`);
+      });
+      for (const index of [0, 40, 80, 120, 169]) {
+        drawing += tx(left + (index + 0.5) * pitch, baseline + 15, index,
+          'diagram-small diagram-mono', 'text-anchor="middle"');
+      }
     });
-    svg('load-chart',a,W,378,msg('load.diagram'),animate);
-    metrics('load-metrics',[[msg('load.nativeMax'),Math.max(...n.loads),'Tiles',`${n.splits} Splits / padded request`],[msg('load.bucketMax'),Math.max(...p.loads),'Tiles',`Budget = ${p.budget}`],[msg('load.batch'),p.total,'Tiles',msg('load.counts', p.tasks.length, p.active)]]);
-    explanation('load-explanation','WORK DISTRIBUTION',loadPreset==='uniform'?msg('load.uniformStart')+Math.max(...n.loads)+msg('load.uniformEnd'):msg('load.skewNote', Math.max(...n.loads), p.budget));
+    drawing += tx((left + right) / 2, 2 * panelHeight + 3, 'CTA ID', 'diagram-small diagram-mono', 'text-anchor="middle"');
+    svg(loadChart, drawing, chartWidth, 2 * panelHeight + 12, msg('load.diagram'), animate);
+    metrics('load-metrics', [
+      [msg('load.nativeMax'), Math.max(...native.loads), 'Tiles', `${native.splits} splits / padded request`],
+      [msg('load.bucketMax'), Math.max(...bucket.loads), 'Tiles', `Budget = ${bucket.budget}`],
+      [msg('load.batch'), bucket.total, 'Tiles', msg('load.counts', bucket.tasks.length, bucket.active)],
+    ]);
+    const note = loadPreset === 'uniform'
+      ? msg('load.uniformStart') + maxTiles + msg('load.uniformEnd')
+      : msg('load.skewNote', maxTiles, bucket.budget);
+    $('#load-explanation').innerHTML = note;
   }
-  $('#load-preset').addEventListener('change',e=>{loadPreset=e.target.value;renderLoad(true);});
+  $('#load-preset').addEventListener('change', event => {
+    loadPreset = event.target.value;
+    renderLoad(true);
+  });
+  new ResizeObserver(() => {
+    if (loadChart.clientWidth > 0 && loadChart.clientWidth !== chartWidth) renderLoad();
+  }).observe(loadChart);
 
   // ---------- Bucket step-through ----------
   let bucketState={preset:'teaching',step:2,selected:4};
