@@ -57,3 +57,16 @@ bank times, unique communication-payload bytes, arena occupancy, prefetch,
 credit waits, CUDA memory and the drained close receipt. Capacity and layout
 choices in this script define these two focused workloads, not universal
 library shape requirements. See [resource design and results](../docs/vpp-resources.md).
+
+For a longer bank, set the per-request input length explicitly while keeping
+chunk capacity and the other control settings matched:
+
+```bash
+python benchmarks/vpp_resources.py --model /path/to/model \
+  --capacity 8192 --prompt-tokens 65536 --layout rank --warmup 1 --repeats 3
+```
+
+Repeat with `--layout edge` for the control; `--prompt-tokens 131072` selects the
+128K follow-up. The engine context bound is input length plus one output token.
+Check the checkpoint's native position range and reported hybrid-KV capacity;
+the script does not override a model's position limit.

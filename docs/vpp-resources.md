@@ -212,3 +212,33 @@ keeping it, without claiming that two slots can never limit another workload.
 Reproduce these points with `benchmarks/vpp_resources.py`; run IDs and all
 individual timing samples are in the CSV. The bounded checks are complete;
 no full curves or additional tuning sweep were run.
+
+## Long-context follow-up plan
+
+Extend only the focused resource comparison to four 65536-token and four
+131072-token P+1 requests, holding capacity at 8192. Compare edge-owned and
+rank-shared layouts at each length: four configuration points, one warm bank
+and three timed banks per point. Keep the same ordered NUMA-local four GPUs,
+6 GiB KV/rank, maximum eight sequences, default native tactics, model precision,
+graphs, W=7 and stage order. The checkpoint declares 262144 maximum text
+positions, so input plus one output fits without a context-limit override.
+
+The previous cache supplied 502 blocks with a 2784-token full-attention block
+size: four 128K inputs need 192 full-attention blocks, plus recurrent-group and
+rounding overhead. The native prior run reported 1,096,669 tokens of cache
+capacity; verify the new lengths' native capacity and actual allocation
+receipts rather than ignoring the hybrid cache groups. Physical communication buffers remain 800 MiB/rank at C8192
+regardless of context length; only the number of traversing chunks grows (32
+and 64 per bank). Longer-history full-attention compute grows while the bytes
+per chunk stay fixed. The relative benefit and backpressure therefore require
+measurement; neither monotonically increasing gains nor zero credit waits are
+assumed.
+
+Reuse `benchmarks/vpp_resources.py`, adding an optional prompt-token argument
+whose default preserves the prior workloads. Do not change the installed
+library, allocator, transport, pipeline or math. Use the existing private
+supervisor and serial four-card launches with the 128 GiB available-memory
+floor, bounded threads, finite timeout and owned-session cleanup. Record all
+bank samples, exact input lengths, allocator peaks, credit/prefetch counts,
+matched output publication counts and drained close receipts. Preserve the
+earlier observations and append these longer points separately.
