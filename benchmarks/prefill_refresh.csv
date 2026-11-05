@@ -1,0 +1,7 @@
+input_tokens,requests,chunk_tokens,graph,repeat,wall_ms
+8192,4,2048,piecewise,1,795.685962
+8192,4,2048,piecewise,2,1267.236346
+8192,4,2048,piecewise,3,1269.659455
+32768,4,4096,piecewise,1,3915.239572
+32768,4,4096,piecewise,2,3921.122105
+32768,4,4096,piecewise,3,3924.974509

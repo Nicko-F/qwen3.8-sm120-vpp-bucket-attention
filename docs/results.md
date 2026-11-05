@@ -14,17 +14,26 @@ and 160 warmup banks.
 
 Each bank processes four requests and generates one output token per request
 (P+1). Timings include scheduling, communication, the LM head, sampling and
-output. The table selects the best CPP and VPP configurations at each input
-length, using the median of three timed banks.
+output. Chunk and graph settings were selected from the original sweep. The
+8K and 32K VPP points were remeasured on November 5 with rank-shared transport
+buffers, using one warmup and three timed banks. CPP and the 64K/128K VPP points
+retain the October 24 measurements. Each table entry is a three-bank median.
 
 | Input tokens/request | CPP, ms/bank | VPP, ms/bank | VPP configuration | Latency reduction |
 | --- | ---: | ---: | --- | ---: |
-| 8,192 | 832.413 | 795.197 | C2048, piecewise | 4.47% |
-| 32,768 | 4,304.359 | 3,936.227 | C4096, piecewise | 8.55% |
+| 8,192 | 832.413 | 1,267.236 | C2048, piecewise | −52.24% |
+| 32,768 | 4,304.359 | 3,921.122 | C4096, piecewise | 8.90% |
 | 65,536 | 11,647.508 | 10,834.357 | C4096, piecewise | 6.98% |
 | 131,071 | 35,241.058 | 33,410.873 | C8192, graph off | 5.19% |
 
-For a single 8K request, CPP C2048/piecewise takes 304.587 ms and the best VPP
+The refreshed 8K banks took 795.686, 1,267.236 and 1,269.659 ms. In the latter
+two banks, the remaining requests entered the engine about 23 ms after the
+first, compared with 1–3 ms in the fast bank. Transport credit waits were zero
+on all ranks. The queue-timing difference is retained alongside the latency
+samples. At 32K, the three banks took
+3,915.240–3,924.975 ms, close to the previous 3,936.227 ms median.
+
+In the original single-request sweep, CPP C2048/piecewise takes 304.587 ms and the best VPP
 configuration takes 310.973 ms. The four-request banks provide more pipeline
 work to overlap.
 
@@ -33,7 +42,8 @@ rank. Sampling uses temperature 0.7 and top-p 0.9. The 128K configuration reserv
 one token for output, giving 131,071 input tokens. Native autotune choices are
 matched within graph comparisons.
 
-Data: [prefill.csv](../benchmarks/prefill.csv).
+Data: [prefill.csv](../benchmarks/prefill.csv),
+[8K/32K individual banks](../benchmarks/prefill_refresh.csv).
 
 ## Pipeline cost model
 

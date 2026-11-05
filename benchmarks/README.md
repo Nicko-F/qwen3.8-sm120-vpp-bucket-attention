@@ -7,7 +7,8 @@ buffer design and resource measurements.
 
 | File | Contents |
 | --- | --- |
-| [prefill.csv](prefill.csv) | Best measured CPP/VPP P+1 bank latency at four input lengths, with the selected VPP chunk and graph settings. |
+| [prefill.csv](prefill.csv) | CPP/VPP P+1 bank latency at four input lengths, with the selected VPP chunk and graph settings; 8K/32K VPP refreshed with rank-shared buffers. |
+| [prefill_refresh.csv](prefill_refresh.csv) | All six timed 8K/32K VPP banks from November 5, retaining the original sampling, graph settings and native tactic tables. |
 | [decode.csv](decode.csv) | Full-model native/bucket decode step latency for short, uniform and skewed context banks. |
 | [http_fusion.csv](http_fusion.csv) | Native, bucket and fused HTTP throughput across six workload banks. |
 | [vpp_resources.csv](vpp_resources.csv) | Matched edge/rank layouts at 8K–128K inputs, including individual bank times, memory allocation and credit waits. |
