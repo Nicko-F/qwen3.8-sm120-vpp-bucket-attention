@@ -13,6 +13,8 @@ operators around attention and MLP inputs.
 [Quick start](#quick-start) · [Architecture](docs/architecture.md) ·
 [Benchmarks](benchmarks/README.md)
 
+**Interactive article** · [Download English HTML](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/raw/refs/heads/main/docs/blog/index.html) · [中文 HTML](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/raw/refs/heads/main/docs/blog/zh-CN.html) · [Reading guide](docs/blog/README.md)
+
 ## Features
 
 - **Folded VPP prefill.** Eight virtual stages run across four GPUs in a folded

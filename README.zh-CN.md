@@ -11,6 +11,8 @@ Bucket Attention，以及 Attention 和 MLP 边界上的低精度算子融合。
 [English](README.md) · [功能](#功能) · [性能](#性能) · [快速开始](#快速开始) ·
 [架构](docs/architecture.md) · [Benchmark](benchmarks/README.md)
 
+**交互技术博客** · [下载中文版 HTML](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/raw/refs/heads/main/docs/blog/zh-CN.html) · [English HTML](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/raw/refs/heads/main/docs/blog/index.html) · [阅读说明](docs/blog/README.md)
+
 ## 功能
 
 - **折返式 VPP Prefill。** 在四张 GPU 上执行八个虚拟 Stage，改善 Attention
