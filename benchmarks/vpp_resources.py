@@ -39,7 +39,7 @@ def model_point(args):
     from qwen_infra.vpp.executor import FoldedExecutor
     from vllm import LLM, SamplingParams
 
-    prompt_tokens = 4 * args.capacity
+    prompt_tokens = 4 * args.capacity if args.prompt_tokens is None else args.prompt_tokens
     options = PrefillConfig(
         args.model, chunk_size=args.capacity, max_model_len=prompt_tokens + 1,
         max_num_seqs=8, resource_layout=args.layout,
@@ -208,12 +208,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model")
     parser.add_argument("--capacity", type=int, choices=(2048, 8192), required=True)
+    parser.add_argument("--prompt-tokens", type=int, help="Tokens per model request (default: 4 * capacity)")
     parser.add_argument("--layout", choices=("edge", "rank"), required=True)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--mode", choices=("model", "module"), default="model")
     parser.add_argument("--messages", type=int, default=20)
     args = parser.parse_args(argv)
+    if args.prompt_tokens is not None and args.prompt_tokens < 1:
+        parser.error("--prompt-tokens must be positive")
     if args.mode == "model":
         if not args.model or args.warmup < 0 or args.repeats < 1:
             parser.error("Model mode requires --model, nonnegative warmup and positive repeats")
