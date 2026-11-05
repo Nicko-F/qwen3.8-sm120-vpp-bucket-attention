@@ -38,7 +38,7 @@ Bucket Attention，以及 Attention 和 MLP 边界上的低精度算子融合。
 
 | 优化 | 测量范围 | Baseline | 收益 |
 | --- | --- | --- | --- |
-| VPP Prefill | 四请求，32K–128K 输入，选定 Chunk/Graph 配置 | CPP | 完整 Bank 延迟降低 **5.19–8.90%** |
+| VPP Prefill | 四请求，8K–128K 输入，各配置扫描中的最佳值 | CPP | 完整 Bank 延迟降低 **4.47–8.55%** |
 | Bucket Attention | 严重 KV 不均衡，B9 / B32，完整模型 Decode | 原生 vLLM | Step 延迟降低 **28.28% / 36.55%** |
 | Bucket 服务 | 混合长度 HTTP 到达负载 | 原生 vLLM | 输出吞吐提高 **10–11%** |
 | 三项算子融合 | B1/8/16/32，1K/2K 上下文，完整 GPU Decode 调用 | 相同 Bucket 路径 | 延迟降低 **2.04–7.18%** |

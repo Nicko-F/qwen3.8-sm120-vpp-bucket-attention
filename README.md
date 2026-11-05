@@ -43,7 +43,7 @@ Representative results on **four NUMA-local RTX 5090 GPUs**, using
 
 | Optimization | Benchmark scope | Baseline | Result |
 | --- | --- | --- | --- |
-| VPP prefill | Four requests, 32K–128K inputs; selected chunk/graph configurations | CPP | **5.19–8.90% lower bank latency** |
+| VPP prefill | Four requests, 8K–128K inputs; best configurations in each sweep | CPP | **4.47–8.55% lower bank latency** |
 | Bucket attention | Full-model decode, severely uneven KV lengths, B9 / B32 | Native vLLM | **28.28% / 36.55% lower step latency** |
 | Bucket serving | Mixed-length HTTP arrivals | Native vLLM | **10–11% higher output throughput** |
 | Three kernel fusions | Full GPU decode call, B1/8/16/32, 1K/2K contexts | Same bucket attention path | **2.04–7.18% lower latency** |
