@@ -1,139 +1,175 @@
-# Installation
+# Installation and usage
 
-## Bootstrap
+qwen-infra adds folded VPP prefill and NVFP4 bucket decode to the native vLLM
+runtime. The examples below use `nvidia/Qwen3.8-27B-NVFP4`; a Hugging Face model
+identifier or local model directory can be passed to every model command.
 
-The bootstrap script creates `.venv` in the checkout, installs the tested native
-runtime and this package, then forwards the command after `--` to `qwen-infra`:
+## Requirements
 
-```bash
-bash scripts/bootstrap.sh --with-toolkit -- serve --model /path/to/model \
-  --profile decode-bucket --tensor-parallel-size 4
-```
+- Linux x86-64 and Python 3.10 or later.
+- An NVIDIA driver compatible with the CUDA 13 runtime.
+- SM120 GPUs for the custom kernels. The tested model uses four RTX 5090s:
+  TP4 for decode and TP1/PP4 for prefill.
+- A host C++ compiler, Ninja and a CUDA 13 toolkit containing `nvcc` for JIT
+  compilation. The bootstrap can install the toolkit inside its virtual environment.
 
-Use `--venv /your/private/environment` to select another environment location.
-Use `--vllm-wheel URL` to test another official wheel. Dependency constraints are
-an installation reference; runtime checks inspect APIs, device capabilities and
-tensor layouts, rather than requiring an exact Git revision.
+The installation reference in [requirements-tested.txt](../requirements-tested.txt)
+uses vLLM `0.32.0rc1.dev196+ga9fe30e9f`, PyTorch `2.14.0+cu130`,
+FlashInfer `0.7.1`, Transformers `5.19.0` and CUTLASS DSL `4.8.0`.
+The adapters use vLLM's internal worker and attention interfaces; test those
+interfaces when upgrading the runtime.
 
-After installation, use `.venv/bin/qwen-infra` directly. Model download/loading
-is delegated to native vLLM/Hugging Face. A local model directory avoids another
-download. No model weights are bundled.
+## Install
 
-The tested model is `nvidia/Qwen3.8-27B-NVFP4`, with original research revision
-`482ca0f3832238542f8f5295dde86b5f22711d80`. That revision records the experiment;
-the library accepts a model identifier or local directory without checking it
-against this historical identifier.
-
-Runtime setup also asks FlashInfer to install its matching cubin wheel and
-minimal SM120f JIT-cache provider using the official CLI. Use `--no-prefetch` for
-offline or already-provisioned environments. A failed optional download reports
-that source JIT remains necessary; it is not reported as successful prefetch.
-These prebuilt native kernels do not replace this package's custom extensions.
-
-## Existing environment
-
-To reuse an environment containing compatible PyTorch, vLLM and FlashInfer:
+From the repository root:
 
 ```bash
-python -m pip install -e . --no-deps
-qwen-infra doctor
-qwen-infra serve --model /path/to/model --profile native
+bash scripts/bootstrap.sh --with-toolkit -- doctor --cuda
+source .venv/bin/activate
 ```
 
-The Python package itself is lightweight. CUDA/C++ extensions build lazily only
-when the corresponding optimization is selected. The original vLLM wheel is
-used; there is no mandatory full vLLM source rebuild.
+The bootstrap creates `.venv`, installs the tested runtime and qwen-infra,
+and runs the command after `--`. With no command, it runs `doctor`.
+The toolkit is installed under the selected environment's `cuda-toolkit`
+directory. CUDA/C++ extensions compile on first use and reuse their build cache
+on subsequent launches.
 
-The tested runtime is vLLM `0.32.0rc1.dev196+ga9fe30e9f`, PyTorch `2.14.0`,
-FlashInfer `0.7.1`, Transformers `5.19.0`, and CUTLASS DSL `4.8.0` with CUDA 13.
-These adapters use internal vLLM interfaces, so newer versions need compatibility
-testing even if installation succeeds.
-
-## Support
-
-| Path | Current implementation contract |
+| Bootstrap option | Use |
 | --- | --- |
-| `native` serving | The installed vLLM's supported devices, models and parallelism. |
-| `decode-bucket` | SM120; native V2 runner; BF16 Q/O; NVFP4 KV; D256; six local Q heads and one KV head; page32; one query token/request; bounded graph rows. |
-| `decode-fused` | Bucket contract plus the implemented H5120 Gemma RMSNorm and static-FP8 output-projection consumer. |
-| `prefill --profile cpp` | Native CPP comparison using the same configured TP1/PP4 prefill bank. |
-| `prefill --profile vpp` | Implemented dense64-layer H5120 Qwen backbone, TP1/PP4, two folded traversals and one generated token per request. |
+| `--venv PATH` | Choose the virtual environment directory; default: `.venv`. |
+| `--python PYTHON` | Choose the Python executable used to create the environment. |
+| `--vllm-wheel URL` | Install a different vLLM wheel in place of the tested requirements file. |
+| `--with-toolkit` | Install CUDA compiler/runtime packages into the selected environment. |
+| `--no-prefetch` | Skip downloads of FlashInfer's prebuilt kernel providers. |
+| `--package-only` | Install qwen-infra alone, useful for CPU tools or an already provisioned environment. |
 
-The current automatic Decode/fusion path is not the separate upstream
-multi-head/multi-query development port. Unsupported Decode configurations
-select native attention before capture when they can be identified safely.
-Compilation errors are reported with their retained build log; they are not
-silently described as successful acceleration.
+Runtime installation prefetches FlashInfer's matching cubin wheel and minimal
+SM120f JIT-cache wheel. For an offline host, provision those wheels and the
+runtime dependencies in advance, then use `--no-prefetch`. When prebuilt
+kernels are unavailable, FlashInfer builds them from source at startup; allow
+additional time for this first launch.
 
-VPP currently excludes prefix caching, asynchronous scheduling, LoRA and
-speculative decoding. Its segmented-DMA backend is a same-host Linux transport.
-The NCCL compatibility option uses native tensor transport and does not imply
-the same performance as the segmented direct-boundary implementation.
+To install into an existing compatible environment:
 
-Measured context coverage extends to 128K. Actual table/index arithmetic and
-allocation limits remain checked; the code does not require a model's configured
-maximum context to equal the author's historical 131072 setting.
+```bash
+python -m pip install -e .
+qwen-infra doctor --cuda
+```
 
-## CUDA, NCCL and caches
+`doctor` reports package versions, the cache directory and `CUDA_HOME`.
+Adding `--cuda` also reports visible GPUs and their compute capabilities.
 
-Custom kernels require an installed CUDA toolkit with `nvcc`, CUDA 13 NVFP4
-support, a working host C++ compiler and the relevant dependency headers.
-`--with-toolkit` installs the matching compiler/runtime packages privately inside
-the selected virtual environment. It does not modify the driver or host toolkit.
-`CUDA_HOME` selects a toolkit. NCCL and FlashInfer headers/libraries are
-discovered from the active environment; missing components are reported by the
-selected extension rather than hidden behind an experiment directory check.
+## Serve
 
-The default package cache follows `XDG_CACHE_HOME` or `~/.cache/qwen-infra`.
-Set `QWEN_INFRA_CACHE_DIR` to choose another location. Native vLLM, Hugging Face
-and PyTorch retain their standard cache controls. Build keys reflect source,
-compiler and flags; they do not grant or deny permission to run the package.
-Build parallelism respects `MAX_JOBS` and defaults to two jobs.
-Without prebuilt providers, the first launch can spend many minutes building
-native FlashInfer kernels; the observed SM120 GEMM alone took about12 minutes.
-The package's custom extensions and model compilation can also require a cold
-build. Later launches reuse normal caches; a quiet startup log alone does not
-mean model requests are running yet.
+Launch the native OpenAI-compatible service:
 
-Use `CUDA_VISIBLE_DEVICES` for GPU selection. Four-GPU comparisons should use
-the same ordered devices and preferably one NUMA domain. There is no hard-coded
-physical GPU list, fixed SM count, required username, private model path or
-global environment modification. GPU P2P policy remains a deployment choice.
+```bash
+qwen-infra serve --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile native --tensor-parallel-size 4 --host 127.0.0.1 --port 8000
+```
 
-## Memory planning
+To enable bucket decode, select `decode-bucket`:
 
-The supported VPP boundary contains two BF16 planes of width 5120. The segmented
-DMA path defaults to rank-shared resources: two source slots and three receive
-slots, with one send and one receive stream shared by both traversals. Use
-`prefill --resource-layout edge` for the previous edge-owned diagnostic layout.
-The seven-batch admission window and virtual-stage order are unchanged.
+```bash
+qwen-infra serve --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile decode-bucket --tensor-parallel-size 4 \
+  --host 127.0.0.1 --port 8000
+```
 
-| Chunk capacity | One boundary slot | Previous middle-rank payload | Rank-shared payload |
-| --- | --- | --- | --- |
-| 2048 | 40 MiB | 1120 MiB | 200 MiB |
-| 8192 | 160 MiB | 4480 MiB | 800 MiB |
+`decode-fused` adds the attention producer and consumer fusions. Both optimized
+profiles configure BF16 activations, NVFP4 KV, FlashInfer attention, a 32-sequence
+budget, synchronous scheduling and CUDA Graph capture. Additional serving
+arguments are forwarded to vLLM. Append `--dry-run` to preview the launch command.
 
-These are fixed communication payload capacities. Edge ranks previously owned
-two pools rather than four. The host path retains eight 16 MiB segments per edge;
-it does not allocate a full host chunk for every in-flight logical entry. Model
-weights, native KV, recurrent state, graphs and build workspace are additional
-allocations. See [the resource design](vpp-resources.md) for lifetime rules and
-focused validation. Reduce chunk capacity or memory budgets for your GPU.
+Send a request with [examples/openai_client.py](../examples/openai_client.py), or
+use any OpenAI-compatible client pointed at `http://127.0.0.1:8000/v1`.
+Model loading and downloads use the normal vLLM/Hugging Face mechanisms.
 
-The research server used a 128 GiB minimum available-host-memory policy and
-same-NUMA selected-idle-device admission. Those are shared-server operating
-rules, not universal RAM/GPU-count requirements embedded in the library.
-Deployments can set `QWEN_INFRA_HOST_RESERVE_GIB` to retain host-memory headroom
-when allocating VPP shared buffers; its library default is zero. NUMA placement
-uses discovered nodes rather than assuming a two-socket host.
+## Run prefill
 
-## Validation status
+The `prefill` command runs a request bank through prefill and generates one token
+per request, abbreviated P+1. Compare conventional pipeline parallelism
+(`cpp`) with the folded pipeline (`vpp`):
 
-The research implementations completed the experiments in [results](results.md).
-The extracted package passed wheel-content, configuration, import and CPU/CI
-checks, plus installed-package Decode/fusion and four-GPU VPP model smokes.
-See [package validation](validation.md) for exact coverage and native shutdown
-warnings. GPU checks used a new private environment with read-only access to
-existing tested dependencies; a fresh internet bootstrap was not independently
-executed end to end. Historical performance tables remain separate from these
-installation checks.
+```bash
+qwen-infra prefill --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile cpp --requests 4 --prompt-tokens 8192 \
+  --chunk-size 2048 --max-model-len 8193
+
+qwen-infra prefill --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile vpp --requests 4 --prompt-tokens 8192 \
+  --chunk-size 2048 --max-model-len 8193
+```
+
+Use `--prompt "text"` or `--prompt-file PATH` for text input.
+`--prompt-tokens N` creates a repeated-token input of exactly N tokens.
+Set `--max-model-len` to cover the prompt plus its output token, and keep it
+within the model's position range. `--chunk-size` controls the token budget per
+prefill chunk; accepted values are 1–16384. Use `--gpu-memory-utilization` to
+adjust the native memory budget, and `--dry-run` to inspect the engine options.
+
+VPP uses rank-shared segmented DMA by default. `--transport nccl` selects the
+native tensor-transport compatibility path. `--resource-layout edge` selects
+the edge-owned buffer layout for resource comparisons.
+
+## Supported configurations
+
+This table describes the implemented optimization paths. The tested checkpoint
+uses TP4 for its six-query-head/one-KV-head local decode geometry.
+
+| Profile | Model and tensor contract | Execution |
+| --- | --- | --- |
+| `serve --profile native` | Models, precision and devices supported by the installed vLLM. | Native serving and parallelism. |
+| `serve --profile decode-bucket` | SM120; BF16 queries/output; native NHD NVFP4 KV with 32-token pages; six Q heads, one KV head and head dimension 256 per rank; full attention with scale 1/16. | One pipeline stage; sequential V2 runner; one query token per request; up to 32 requests; optimized graph rows 1, 8, 16, 24 and 32. |
+| `serve --profile decode-fused` | Bucket contract plus hidden size 5120, Gemma RMSNorm with epsilon 1e-6, gated attention and a static per-tensor FP8 output-projection input. | Bucket execution plus fused attention producers and consumers. |
+| `prefill --profile cpp` | BF16 activations and NVFP4 KV through native FlashInfer. | Native TP1/PP4 prefill and one output token. |
+| `prefill --profile vpp` | Dense 64-layer, hidden-size-5120 Qwen backbone. | TP1/PP4; two folded traversals; P+1 request banks; same-host Linux transport. |
+
+The optimized decode worker checks the device, runner, model geometry and native
+KV layout before installing its graphs. Unsupported configurations use native
+attention, and startup logs report the reason. Unselected graph shapes and
+non-decode work retain the native route. The task planner sizes its work from
+the device's discovered SM count within its supported 32–340 range.
+
+The optimized profiles use synchronous scheduling with prefix caching disabled.
+Decode integration also requires speculation, LoRA, dual-batch overlap, context
+parallelism, sleep mode and weight transfer to be disabled. VPP currently
+supports P+1 banks with prefix caching, asynchronous scheduling, LoRA and
+speculative decoding disabled. Contexts through 128K have been measured;
+capacity is configured from the model, index bounds and available memory.
+
+## Toolchains, caches and memory
+
+The package discovers CUDA, NCCL, cuBLAS and FlashInfer from the active
+environment. Use `CUDA_HOME` for an existing toolkit, `NCCL_HOME` or
+`CUBLAS_HOME` for alternative dependency locations, and `QWEN_INFRA_CCCL_INCLUDE`
+for a CCCL include directory containing `nv/target`.
+Compiler errors retain their build logs for inspection.
+
+The package cache follows `XDG_CACHE_HOME` or `~/.cache/qwen-infra`;
+`QWEN_INFRA_CACHE_DIR` selects an explicit location. The bootstrap places
+temporary, pip and XDG caches under the checkout's `.cache` directory unless
+those environment variables are already set. Hugging Face, vLLM and PyTorch
+also support their usual cache settings. `MAX_JOBS` controls build parallelism
+and defaults to two; `OMP_NUM_THREADS` also defaults to two.
+
+Select GPUs with `CUDA_VISIBLE_DEVICES`. For four-GPU measurements, use the same
+ordered devices for both profiles and place the group within one NUMA domain.
+
+Rank-shared VPP communication uses two source slots and three receive slots per
+rank. Each slot holds BF16 hidden and residual planes of width 5120:
+
+| Chunk capacity | Bytes per slot | Device communication payload per rank |
+| --- | --- | --- |
+| 2048 tokens | 40 MiB | 200 MiB |
+| 8192 tokens | 160 MiB | 800 MiB |
+
+Model weights, KV cache, recurrent state, CUDA Graphs and build workspace add
+to this budget. The segmented transport also uses eight 16 MiB host segments
+per edge. Reduce the chunk or native memory budget to fit the target machine.
+`QWEN_INFRA_HOST_RESERVE_GIB` optionally reserves host-memory headroom for VPP
+shared-buffer allocations; its default is zero.
+
+See [VPP resources](vpp-resources.md) for buffer lifetimes and measurements,
+[validation](validation.md) for tests, and [benchmarking](../benchmarks/README.md)
+for comparison recipes.

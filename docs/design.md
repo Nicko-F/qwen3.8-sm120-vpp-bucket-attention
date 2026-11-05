@@ -1,89 +1,82 @@
-# Release design
+# Integration design
 
-This repository packages two independently usable inference optimizations:
-folded virtual pipeline parallelism (VPP) for prefill, and load-balanced paged
-attention for decode. CUDA fusion modules form a separate optional layer.
-It is an extension of vLLM and FlashInfer, rather than a replacement serving
-engine. Native vLLM remains available as a comparison and fallback.
+The package keeps model execution and serving inside vLLM. Workers install
+prefill or decode extensions during model initialization, before profiling and
+CUDA Graph capture. CUDA/C++ modules build lazily against the active runtime.
 
-## Interface and deployment
+## Execution profiles
 
-- Install a normal Python package in a private environment. Use a small command
-  line entry point for setup, serving, prefill, diagnostics and examples.
-- Accept a Hugging Face model identifier or local model directory, visible CUDA
-  devices, parallelism, memory budget and output/cache locations as configuration.
-- Keep the OpenAI-compatible API and native vLLM request handling. Do not add a
-  second scheduler, experiment supervisor or HTTP framework for packaging.
-- Provide a one-command bootstrap into a checkout-local virtual environment;
-  show the command before starting a service and support dry-run diagnostics.
-- Dependency constraints describe a tested installation. Git revisions record
-  provenance; startup checks inspect required APIs and tensor layouts, not source
-  hashes, usernames, historical runs or an author's environment names.
+| Profile | vLLM integration | Execution |
+| --- | --- | --- |
+| `native` | Standard serving entry point | Native model, scheduler and attention |
+| `decode-bucket` | `DecodeWorker` | Native/aligned/persistent attention routing with shared planning |
+| `decode-fused` | `DecodeWorker` plus fusion hooks | Bucket attention with fused input/output producers |
+| `cpp` | Standard prefill runner | Chunked prefill at TP1/PP4 |
+| `vpp` | Folded executor, worker and model runner | Folded TP1/PP4 prefill with segmented DMA or NCCL |
 
-## Reuse boundaries
+The CLI accepts model IDs or paths and forwards serving arguments to vLLM.
+Configuration and device selection use ordinary command-line arguments and
+runtime environment variables; see [installation](installation.md).
 
-The first release retains the working automatic native/aligned/persistent Decode
-dispatch and three-fusion lifecycle. Its XQA task body becomes maintained,
-licensed source rather than runtime source-string substitutions. The newer
-source-level FlashInfer contribution remains an upstream-development reference:
-it exposes fixed ownership modes and does not yet contain this complete routing
-and fusion path. Measurements must remain distinct. A new import/package layout
-is not automatically GPU-validated because the original implementation worked.
+## Prefill dataflow
 
-VPP reuses the working native vLLM runner/executor adapters and segmented CUDA
-DMA/NCCL boundary implementation. Remove experiment evidence writers, historical
-autotune-table requirements and private-root checks from the deployment path.
-Keep bounded queue ownership, buffer lifetime and required capability checks.
-The current folded adapter has a genuine, documented model/parallelism contract;
-packaging does not imply support for arbitrary models or asynchronous decode.
+The folded executor broadcasts admission and continuation messages. Rank-local
+queues choose forward or return work while maintaining recurrent-state order.
+The worker binds the selected virtual stage, acquires an input lease, runs its
+layers and publishes hidden/residual outputs into a source slot.
 
-The maintained public VPP path is the rank-shared segmented-DMA implementation.
-It allocates two source and three receive slots once per rank, shares one stream
-per copy direction across both traversals, and preserves W=7 and stage order.
-The edge-owned layout is an explicit diagnostic control. Source and installed
-model checks for the current implementation are recorded in
-[the resource report](vpp-resources.md), including the 64K/128K latency and
-memory comparisons. The original full prefill curves retain their historical
-measurement scope.
+Segmented DMA transfers the output through a registered host ring into a shared
+receive slot on the next rank. CUDA events track each tensor plane. Source
+credits return after D2H completion; receive credits return after the consuming
+stage's completion event. Per-edge sequence and batch identities accompany
+rank-shared physical storage.
 
-Fusion is opt-in. Preserve residual precision, native quantization scales and
-consumer layout. Normal compiler cache identities are legitimate; exact-source
-hash access gates are not. The small HTTP fusion differences do not establish
-universal serving gains.
+| Source | Responsibility |
+| --- | --- |
+| [`vpp/layout.py`](../src/qwen_infra/vpp/layout.py) | Layer placement, rank-local order and window accounting |
+| [`vpp/executor.py`](../src/qwen_infra/vpp/executor.py) | Admission, continuation and result collection |
+| [`vpp/worker.py`](../src/qwen_infra/vpp/worker.py), [`runner.py`](../src/qwen_infra/vpp/runner.py) | Stage execution and input/output binding |
+| [`vpp/model.py`](../src/qwen_infra/vpp/model.py) | Folded model adapter |
+| [`vpp/producer.py`](../src/qwen_infra/vpp/producer.py) | Direct boundary output publication |
+| [`vpp/native/`](../src/qwen_infra/vpp/native/) | Segmented DMA, host rings, events, credits and shared device pools |
 
-## Validation and resources
+The [communication design](vpp-resources.md) gives the complete stream and
+buffer lifecycle.
 
-First verify package imports, configuration, installed wheel contents and command
-construction in CPU-only tests. Then use an isolated installed-package smoke for
-the selected supported runtime and a bounded model integration anchor. Reuse the
-completed performance experiments; do not rerun their full curves for packaging.
-Report separately what was measured before extraction and validated afterward.
+## Decode graph lifecycle
 
-On the shared development server, all work stays in the private workspace,
-selected devices must be idle, four-GPU roles stay within one NUMA node, threads
-and build jobs are bounded, and available host memory must stay above 128 GiB.
-These operational rules are not universal hardware requirements of the library.
+`DecodeWorker` discovers eligible NVFP4 attention layers, creates shared planning
+workspaces and installs execution adapters before graph capture. Layers with
+compatible request metadata share the task map; layer-specific pointers and
+partial-output scratch remain local to each attention call.
 
-## Public repository contents
+At the forward boundary the runtime refreshes lengths and selects a route.
+Captured graphs use stable workspace addresses. Native graph entries remain
+available for the native route, and the lifecycle restores those entries during
+shutdown. Runtime capability and tensor checks select the native path for
+configurations outside the extension's supported geometry.
 
-Include source, necessary redistributable dependency patches, unit/integration
-tests, small examples, CI, documentation and curated benchmark tables. Preserve
-third-party licenses and modification notices. Exclude model weights, datasets,
-private NVIDIA reference binaries/PTX, credentials, personal connection settings,
-environment caches, historical transfer scripts and raw private machine logs.
+| Source | Responsibility |
+| --- | --- |
+| [`worker.py`](../src/qwen_infra/worker.py) | Model-load hooks, lifecycle setup and status RPC |
+| [`kernels/nvfp4_kv_bucket_worker.py`](../src/qwen_infra/kernels/nvfp4_kv_bucket_worker.py) | Shared workspaces, route selection and graph integration |
+| [`kernels/nvfp4_bucket_xqa.py`](../src/qwen_infra/kernels/nvfp4_bucket_xqa.py) | Task planning, binding and CUDA launches |
+| [`kernels/nvfp4_bucket_xqa.cu`](../src/qwen_infra/kernels/nvfp4_bucket_xqa.cu) | CUDA assignment and attention entry points |
+| [`kernels/xqa_task_impl.cuh`](../src/qwen_infra/kernels/xqa_task_impl.cuh) | Adapted XQA task execution |
 
-The existing research repository and immutable experimental evidence remain
-unchanged. This checkout is the maintained public source tree, with Git history
-instead of version-copy directories.
+## Fusion integration
 
-## Acceptance
+Fusion producers return the formats already expected by native GEMMs: packed
+NVFP4 values/scales for the MLP and FP8 values for the attention output
+projection. The residual stream stays BF16. Named graph owners hold captured
+buffers throughout the graph lifecycle.
 
-1. A fresh checkout has a documented install and launch path without the author's
-   filesystem, private repository or historical outputs.
-2. Both VPP and bucket attention contain real implementations and runnable entry
-   points; unsupported combinations are explained before model allocation.
-3. Native mode remains usable independently of optional extensions.
-4. Package tests and the bounded installation smoke have recorded outcomes;
-   pending GPU validation is stated precisely.
-5. The public README explains architecture, usage, support and measured benefits
-   without mixing module, model and HTTP measurements.
+| Source | Responsibility |
+| --- | --- |
+| [`kernels/service_fusions.py`](../src/qwen_infra/kernels/service_fusions.py) | Install model and compiler hooks |
+| [`kernels/nvfp4_norm_pack.cu`](../src/qwen_infra/kernels/nvfp4_norm_pack.cu) | Residual, Gemma RMSNorm and NVFP4 packing |
+| [`kernels/nvfp4_attention_front.cu`](../src/qwen_infra/kernels/nvfp4_attention_front.cu) | QK norm, RoPE and KV append |
+| [`kernels/nvfp4_attention_fusion.py`](../src/qwen_infra/kernels/nvfp4_attention_fusion.py) | Attention boundary adapters and output fusion |
+
+See [architecture](architecture.md#precision) for precision, [testing](validation.md)
+for checks and [references](references.md) for upstream sources.

@@ -1,114 +1,118 @@
 # Qwen3.8 SM120: VPP & Bucket Attention
 
 [![CI](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml/badge.svg)](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/workflows/ci.yml)
+[![GPU: SM120](https://img.shields.io/badge/GPU-SM120-76B900)](docs/installation.md)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) ·
-[Results](docs/results.md) · [Installation](docs/installation.md) ·
-[Contributing](CONTRIBUTING.md)
+**Faster Qwen3.8 inference on NVIDIA Blackwell GPUs, from pipeline scheduling to CUDA kernels.**
+Built on vLLM and FlashInfer, this project combines folded VPP for long-context
+prefill, load-balanced bucket attention for decode, and fused low-precision
+operators around attention and MLP inputs.
 
-Inference optimizations for Qwen3.8 on NVIDIA SM120 GPUs, built on **vLLM and
-FlashInfer**:
+[中文](README.zh-CN.md) · [Features](#features) · [Performance](#performance) ·
+[Quick start](#quick-start) · [Architecture](docs/architecture.md) ·
+[Benchmarks](benchmarks/README.md)
 
-- **Prefill:** folded virtual pipeline parallelism (VPP), with segmented CUDA
-  DMA or NCCL boundary transport. The DMA path shares two output and three input
-  slots per rank; see the [resource model](docs/vpp-resources.md).
-- **Decode:** KV-length-aware bucket attention, shared planning across compatible
-  layers, and native fallback for unsuitable workloads.
-- **Kernels:** optional residual/RMSNorm → NVFP4 packing, QK norm/RoPE/KV append,
-  and attention-output/FP8 quantization fusion.
+## Features
 
-This repository contains the deployable source package. Model weights and the
-research workspace's environments, caches and experiment orchestration are
-separate. The new package's installation validation is tracked in
-[installation](docs/installation.md); the [performance tables](docs/results.md)
-come from the completed research experiments.
+- **Folded VPP prefill.** Eight virtual stages run across four GPUs in a folded
+  pipeline, reducing fill/drain bubbles as attention cost grows with context.
+  Segmented CUDA DMA overlaps boundary transfers with computation through copy
+  engines and a compact, rank-shared buffer pool.
+- **KV-length-aware decode.** A shared task planner balances KV work across
+  CTAs for mixed-length requests. Automatic native, aligned and persistent paths
+  adapt execution to the workload; compatible attention layers reuse the plan.
+- **Fused CUDA operators.** Residual/RMSNorm → NVFP4 packing, QK Norm/RoPE/KV
+  append, and attention-output/gate → FP8 quantization reduce launches and
+  intermediate memory traffic.
+- **vLLM integration.** Serving profiles keep vLLM's continuous batching,
+  sampling and OpenAI-compatible API. Prefill and decode have separate execution
+  profiles for development and benchmarking.
+
+| Component | Workload | Implementation | Entry point |
+| --- | --- | --- | --- |
+| Folded VPP | Long-context prefill, TP1/PP4 | Eight virtual stages; segmented DMA or NCCL transport | `qwen-infra prefill --profile vpp` |
+| Bucket attention | Decode with uneven KV lengths | NVFP4 paged KV; shared planning; FlashInfer XQA task execution | `qwen-infra serve --profile decode-bucket` |
+| Kernel fusion | Decode attention and MLP boundaries | CUDA C++ producers for packed NVFP4 and FP8 consumers | `qwen-infra serve --profile decode-fused` |
+| Native execution | Reference comparisons | Original vLLM serving and CPP prefill | `--profile native` / `--profile cpp` |
+
+## Performance
+
+Representative results on **four NUMA-local RTX 5090 GPUs**, using
+`nvidia/Qwen3.8-27B-NVFP4` with NVFP4 KV cache:
+
+| Optimization | Benchmark scope | Baseline | Result |
+| --- | --- | --- | --- |
+| VPP prefill | Four requests, 8K–128K inputs; best configurations in each sweep | CPP | **4.47–8.55% lower bank latency** |
+| Bucket attention | Full-model decode, severely uneven KV lengths, B9 / B32 | Native vLLM | **28.28% / 36.55% lower step latency** |
+| Bucket serving | Mixed-length HTTP arrivals | Native vLLM | **10–11% higher output throughput** |
+| Three kernel fusions | Full GPU decode call, B1/8/16/32, 1K/2K contexts | Same bucket attention path | **2.04–7.18% lower latency** |
+
+See [performance results](docs/results.md) for absolute timings and workload
+definitions, and [benchmarking](benchmarks/README.md) to run comparisons.
 
 ## Quick start
 
-Use Linux with NVIDIA GPUs. After cloning, bootstrap creates a private virtual
-environment and starts vLLM's OpenAI-compatible server:
+### Install and serve
+
+On Linux with SM120 GPUs, bootstrap creates `.venv`, installs the runtime and
+starts the OpenAI-compatible server:
 
 ```bash
 git clone https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention.git
 cd qwen3.8-sm120-vpp-bucket-attention
 bash scripts/bootstrap.sh --with-toolkit -- serve \
   --model nvidia/Qwen3.8-27B-NVFP4 \
-  --profile decode-bucket \
-  --tensor-parallel-size 4 \
-  --max-model-len 32768 \
-  --host 127.0.0.1 --port 8000
+  --profile decode-bucket --tensor-parallel-size 4 \
+  --max-model-len 32768 --host 127.0.0.1 --port 8000
 ```
 
-`--model` accepts your own local directory or Hugging Face model identifier.
-The tested checkpoint is [NVIDIA's mixed NVFP4
-release](https://huggingface.co/nvidia/Qwen3.8-27B-NVFP4); use a local copy to
-skip downloading it again.
-Select GPUs with the standard `CUDA_VISIBLE_DEVICES` environment variable.
-The four-GPU setting above is the tested model deployment, not a requirement of
-native mode. See [supported configurations](docs/installation.md#support).
-Omit `--with-toolkit` when a compatible CUDA toolkit is already available.
+Use a local checkpoint directory with `--model`, select devices through
+`CUDA_VISIBLE_DEVICES`, and omit `--with-toolkit` when CUDA is already installed.
+See [installation and supported configurations](docs/installation.md).
+
+### Enable fused operators
 
 ```bash
-# Inspect dependencies and capabilities without loading model weights.
-.venv/bin/qwen-infra doctor
-
-# Keep the original vLLM path, or explicitly enable the fusion candidate.
-.venv/bin/qwen-infra serve --model /path/to/model --profile native
-.venv/bin/qwen-infra serve --model /path/to/model --profile decode-fused \
-  --tensor-parallel-size 4
-
-# Run the current rank-shared VPP implementation on four ranks.
-.venv/bin/qwen-infra prefill --model /path/to/Qwen-NVFP4 --profile vpp \
-  --resource-layout rank --chunk-size 2048 --prompt-tokens 8192 --requests 4
+.venv/bin/qwen-infra serve --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile decode-fused --tensor-parallel-size 4 \
+  --max-model-len 32768 --host 127.0.0.1 --port 8000
 ```
 
-Native vLLM arguments remain available. Use `--dry-run` to inspect the resolved
-launch before allocating a model. No historical run, source hash, private
-directory or author-specific environment is required.
+### Run prefill
 
-The default segmented-DMA VPP path uses `--resource-layout rank`: each rank
-preallocates **two source slots and three receive slots**, with one main compute
-stream and one stream per copy direction. Both traversals share this storage;
-slot ownership changes without per-chunk communication-buffer allocation.
-W=7 and the virtual-stage order are preserved. At C8192, communication storage
-is **800 MiB/rank**; see the [resource model](docs/vpp-resources.md).
+Run four 8K prompts through VPP, generating one output token per request:
 
-## Measured results
+```bash
+.venv/bin/qwen-infra prefill --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile vpp --chunk-size 2048 --prompt-tokens 8192 --requests 4
+```
 
-The completed experiments used four same-NUMA RTX 5090 GPUs, mixed NVFP4 weights,
-NVFP4 KV and native model arithmetic. Metrics below have different scopes and
-must not be added together.
+Use `--profile cpp` for the native pipeline comparison. The VPP DMA path shares
+two output slots and three input slots per rank; the
+[communication design](docs/vpp-resources.md) explains streams, prefetch and
+buffer lifetimes.
 
-| Scope | Observation |
+## Documentation
+
+| Guide | Contents |
 | --- | --- |
-| Static prefill, four requests | Best VPP configurations reduced bank latency by **4.47–8.55%** against the best measured CPP configurations over 8K–128K inputs. |
-| Full-model decode, severe KV skew | Bucket routing reduced measured step latency by **28.28% / 36.55%** in the declared B9 / B32 windows. |
-| Finite mixed HTTP banks | Bucket attention improved output throughput by about **10–11%** in the measured mixed-arrival banks; uniform throughput was near parity. |
-| Fusion, controlled GPU calls | All three fusions reduced latency by **2.04–7.18%** against the same bucket path over the tested 1K/2K contexts and batch sizes. |
-| Fusion, HTTP | Additional throughput changes ranged from **−1.46% to +1.76%**; there is no universal serving gain. |
+| [Installation](docs/installation.md) | Runtime setup, launch options and supported configurations |
+| [Architecture](docs/architecture.md) | VPP, bucket attention, fusion and precision |
+| [Integration design](docs/design.md) | vLLM extension points and source map |
+| [VPP communication](docs/vpp-resources.md) | Copy pipeline, events, credits and memory budget |
+| [Performance](docs/results.md) | Prefill, decode, operator and HTTP results |
+| [Benchmarking](benchmarks/README.md) | Comparison commands and data tables |
+| [Testing](docs/validation.md) | CPU tests, CUDA checks and model integration |
 
-See [results and limitations](docs/results.md) for baselines, absolute timings,
-negative results and measurement boundaries. These figures reuse the completed
-benchmark datasets. The shared-buffer implementation preserves pipeline order;
-its resource checks are recorded separately in the [resource report](docs/vpp-resources.md).
+## Acknowledgements
 
-## Project layout
+This project builds on [vLLM](https://github.com/vllm-project/vllm),
+[FlashInfer](https://github.com/flashinfer-ai/flashinfer),
+[Tencent HPC-Ops](https://github.com/Tencent/hpc-ops), and the
+[VPP paper and implementation](https://arxiv.org/abs/2608.26523).
+See [references](docs/references.md) for the algorithms and source adaptations.
 
-```text
-src/qwen_infra/   Python integration and packaged CUDA/C++ sources
-scripts/          Private-environment bootstrap
-examples/         Small usage examples
-tests/            Configuration, packaging and integration checks
-benchmarks/       Curated tables and benchmark methodology
-docs/             Architecture, installation, results and source references
-```
-
-## License and acknowledgements
-
-Project code is under [Apache-2.0](LICENSE), with third-party notices preserved in
-[NOTICE](NOTICE) and [licenses/](licenses/). Key references are
-[VPP](https://arxiv.org/abs/2608.26523),
-[Tencent HPC-Ops](https://github.com/Tencent/hpc-ops),
-[FlashInfer](https://github.com/flashinfer-ai/flashinfer), and
-[vLLM](https://github.com/vllm-project/vllm).
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Project code is licensed under [Apache-2.0](LICENSE), with third-party attribution
+in [NOTICE](NOTICE) and [licenses/](licenses/).

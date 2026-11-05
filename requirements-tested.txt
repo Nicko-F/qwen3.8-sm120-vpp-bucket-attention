@@ -1,4 +1,4 @@
-# Tested installation reference, not a runtime version/hash access gate.
+# Tested CUDA 13 runtime dependencies.
 --extra-index-url https://download.pytorch.org/whl/cu130
 vllm @ https://wheels.vllm.ai/a9fe30e9f6f73a982eab0730476df165484ad4d4/vllm-0.32.0rc1.dev196%2Bga9fe30e9f-cp38-abi3-manylinux_2_28_x86_64.whl
 torch==2.14.0+cu130

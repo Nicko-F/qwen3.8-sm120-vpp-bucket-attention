@@ -1,92 +1,127 @@
-# Package validation
+# Testing and validation
 
-This record validates extraction and installation separately from the historical
-[performance results](results.md). No new performance gain is claimed here.
+Use the CPU checks for package changes, the model tests for runtime integration,
+and the transport checks for VPP ownership and buffer reuse. Supported models
+and execution settings are listed in
+[Supported configurations](installation.md#supported-configurations).
 
-The current public VPP path is rank-shared segmented DMA (`resource_layout=rank`).
-Its kernel implementation is `8161a2d`, followed by benchmark/documentation
-changes. It passed a 120-boundary transport check and installed-model checks at
-4x8K, 4x32K, 4x64K and 4x128K, with drained ownership and task-owned cleanup.
-See [current VPP results](vpp-resources.md#long-context-measurements). The
-extraction-smoke records below are retained as historical validation of the
-earlier package; they are not the revision selected as today's default.
+## CPU and package checks
 
-| Check | Outcome |
+Install the development tools in the active environment and run the same
+checks as the Linux CI job:
+
+```bash
+python -m pip install -e '.[dev]'
+python -m ruff check src tests
+python -m pytest -q -m 'not gpu'
+python -m build
+python scripts/check_wheel.py dist/*.whl
+```
+
+The suite covers configuration and fallback decisions, task planning, graph
+ownership, package import closure, runtime-path discovery, bootstrap forwarding,
+and VPP slot/control behavior. Linux bootstrap fixtures exercise installer
+commands without downloading the runtime. C++ ownership tests run when a host
+compiler is available; checks needing optional dependencies are skipped when
+those dependencies are absent.
+
+To run the C++ slot and generation test directly:
+
+```bash
+c++ -std=c++17 -Isrc/qwen_infra/vpp/native \
+  tests/slot_pool.cpp src/qwen_infra/vpp/native/interface.cpp \
+  src/qwen_infra/vpp/native/slot_pool.cpp -o /tmp/qwen-slots
+/tmp/qwen-slots
+```
+
+The wheel check verifies that every CUDA/C++ JIT source asset is packaged.
+The [Linux CI workflow](../.github/workflows/ci.yml) runs lint, CPU tests,
+wheel construction, source-asset verification and the standalone C++ test.
+
+## Inspect an installation
+
+```bash
+qwen-infra doctor
+qwen-infra doctor --cuda
+qwen-infra serve --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile decode-bucket --tensor-parallel-size 4 --dry-run
+qwen-infra prefill --model nvidia/Qwen3.8-27B-NVFP4 \
+  --profile vpp --requests 4 --prompt-tokens 8192 \
+  --chunk-size 2048 --max-model-len 8193 --dry-run
+```
+
+The plain doctor and launch previews run without loading a model.
+`doctor --cuda` initializes CUDA and reports visible devices.
+
+## Decode model tests
+
+Expose exactly four compatible GPUs and set a model identifier or local path:
+
+```bash
+QWEN_INFRA_TEST_MODEL=nvidia/Qwen3.8-27B-NVFP4 \
+  python -m pytest -m gpu -s tests/test_gpu_model.py
+```
+
+The test runs `native`, `decode-bucket` and `decode-fused` in sequence.
+Each profile submits eight short requests and checks completion. Optimized
+profiles also query the worker's `qwen_infra_status` RPC to check bucket
+installation, fallback status, the captured eight-row aligned graph and the
+selected route. The model environment variable opts into these GPU tests.
+
+For applications using vLLM's Python `LLM` API, inspect the same metadata with:
+
+```python
+status = llm.collective_rpc("qwen_infra_status", timeout=60)
+```
+
+The response includes per-rank eligible layer counts, captured row/route pairs,
+scratch bytes, native-graph preservation and fusion status.
+
+## VPP transport and model checks
+
+Run the four-GPU transport check before a model comparison:
+
+```bash
+python benchmarks/vpp_resources.py \
+  --mode module --capacity 8192 --layout rank
+```
+
+The default workload sends 20 messages over each of six boundaries. It varies
+valid rows, delays plane publication, wraps logical slots, verifies payload
+identity and rejects retired tickets. It also checks the two-source/three-receive
+slot budget and confirms zero live ownership after transport close.
+`--messages` accepts 8–64.
+
+For a complete prefill path, run the CPP and VPP examples in the
+[installation guide](installation.md#run-prefill). Each command returns an array
+of request records; check `finished=true` and one output token per request.
+
+The focused model check adds warmup, repeated bank timing and resource receipts:
+
+```bash
+python benchmarks/vpp_resources.py --model nvidia/Qwen3.8-27B-NVFP4 \
+  --capacity 2048 --layout rank --warmup 1 --repeats 3
+```
+
+Its final JSON includes completed banks, per-rank resource data and the
+transport-close result. See [benchmarking](../benchmarks/README.md) for matched
+edge/rank comparisons and longer contexts.
+
+## Completed checks
+
+| Area | Recorded coverage |
 | --- | --- |
-| Local CPU suite | 30 passed; three opt-in GPU cases and two Linux-only cases skipped on Windows. |
-| Ruff | Passed. |
-| C++ slot ownership/generation | Passed. |
-| Wheel source assets | All 19 CUDA/C++ JIT assets included. |
-| Isolated lightweight wheel install | Doctor and native/decode/VPP launch previews passed without GPU dependencies. |
-| Public Linux CI | [Passed for `48dfad0`](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/runs/41867204118), including bootstrap fixtures. |
-| Linux wheel with reused runtime | Package import closure passed from the installed virtual environment. |
-| Installed Decode/fusion model | Passed: 42/42 requests, eight output tokens each, exit 0. |
-| Installed VPP model | Passed: four 8K-token requests, one output token each, exit 0. |
+| CPU/package | Configuration, imports, planning, bootstrap fixtures, C++ ownership, lint and wheel source assets; [public Linux CI](https://github.com/Nicko-F/qwen3.8-sm120-vpp-bucket-attention/actions/runs/41867204118). |
+| Installed decode/fusion | 42 completed requests across banks of 1, 9 and 32; eight output tokens per request; all four ranks installed bucket attention and fusions, captured both routes at all five supported row sizes, and preserved native graphs. |
+| Installed VPP | Four 8K-token P+1 requests completed through the installed package and segmented transport. |
+| Rank-shared transport | 120 boundary receives with payload checks, slot reuse, retired-ticket rejection and fully drained ownership. |
+| Rank-shared model/resource | Four-request P+1 banks at 8K, 32K, 64K and 128K input lengths; matched edge/rank layouts and drained transport receipts. |
 
-The Linux runtime uses a new private virtual environment with read-only access
-to the existing tested PyTorch/vLLM/FlashInfer dependencies and local model
-weights. Package source and caches are separate from the research workspace.
-This is not a fresh internet bootstrap or a new full performance matrix.
+The installed-model checks used the tested runtime dependencies and model
+weights. Some tested vLLM runs emitted worker or EngineCore termination warnings
+during shutdown after requests completed. When investigating shutdown, retain
+the native logs and check transport closure separately from inference results.
 
-The first GPU startup was deliberately stopped after the validation wrapper
-omitted the reused environment's Ninja executable from PATH. Its owned process
-session was cleaned and the GPUs released. The wrapper's tool discovery was
-corrected before retrying; no kernel arithmetic or package dependency was changed
-to address this operational issue.
-
-The next run reached its 1200-second limit while native FlashInfer kernels were
-still building: `gemm_sm120` completed in about 12 minutes, `gemm` in about 44
-seconds, and `fp4_gemm_cutlass_sm120` remained in compilation. There were no
-request-bank outputs, Python tracebacks or optimized-route receipts. Its owned
-session was cleaned. The completed Decode smoke then used the official matching
-SM120 prebuilt kernel provider. Failed runs and the native cache were retained;
-attention mathematics did not change.
-
-GPU checks use four selected idle GPUs in one NUMA domain, bounded threads,
-unique logs, a finite timeout and an external 128 GiB available-memory floor.
-Only the validation's owned process session may be stopped. Those shared-server
-rules are not startup requirements imposed on other users by the library.
-
-## Decode model anchor
-
-The installed kernel implementation is revision `085d4e6`. Later CLI preview,
-installer and documentation changes do not alter those kernels. The official
-providers installed successfully: `flashinfer-cubin` 0.7.1,
-`flashinfer-jit-cache` 0.7.1+cu130, and `flashinfer-jit-cache-sm120f` 0.7.1+cu130.
-
-The completed model smoke used banks with 1, 9 and 32 requests. All 42 requests
-finished with 8 output tokens each (336 total). Each of four ranks reported 16
-eligible FA layers, bucket attention installed, fusions enabled, all 10 extra
-captures (rows 1/8/16/24/32, aligned/persistent), and preserved native graphs.
-No worker reported a fallback reason. Per-rank scratch was 6,180,864 bytes.
-
-Final route receipts were aligned. Persistent capture readiness is verified;
-transient selection during earlier mixed-bank steps was not observed by the
-final-status RPC and is not claimed. This smoke establishes installed-package
-execution, not a new performance or semantic-quality result.
-
-The model run exited 0 and its owned process session was empty after cleanup.
-Native vLLM shutdown nevertheless reported forced termination of four workers
-and semaphore/shared-memory cleanup warnings; it is not described as a fully
-graceful shutdown.
-
-## VPP model anchor
-
-The same installed kernel revision completed TP1/PP4 folded VPP with segmented
-DMA, a 2048-token chunk capacity, four 8192-token prompts and one generated token
-per request. The installed package built its native C++ transport and bound
-stage graphs; all four requests reported `finished=true`.
-
-The CLI completed its mandatory all-rank transport-close RPC before requesting
-native engine shutdown. The close implementation rejects live contexts or
-leases and drains slots. Successful closure follows from that guarded RPC
-returning; numeric lease/slot receipts were not printed and are not claimed as
-directly observed counters.
-
-The run exited 0, its owned process session was empty after cleanup, and the
-selected GPUs were released. Native vLLM reported all four workers exited
-gracefully, followed by forced termination of the remaining EngineCore process.
-FlashInfer also selected default tactics for untuned shapes. These warnings are
-retained; this smoke is not a throughput benchmark or a fully graceful-shutdown
-claim. The optional NCCL VPP transport was not separately executed in this
-package-validation run.
+Timing tables and measurement settings are in [Results](results.md).
+The [VPP resource design](vpp-resources.md) contains transport occupancy,
+allocation and long-context measurements.

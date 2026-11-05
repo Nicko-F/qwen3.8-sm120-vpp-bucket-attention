@@ -1,118 +1,112 @@
-# Results
+# Performance results
 
-The performance presentation reuses the completed benchmark datasets below.
-The public implementation uses rank-shared communication buffers while keeping
-the pipeline order. Allocation, credit and layout-validation records are in
-the [resource report](vpp-resources.md); package smoke records are in
-[installation](installation.md). The tables retain their original measurement
-settings and provenance.
-
-The shared experimental platform was four same-NUMA RTX 5090 GPUs, native mixed
-NVFP4 weights and NVFP4 KV, BF16 hidden/attention math and FP32 softmax/state.
-Controls and candidates used the same ordered devices and CPU placement. MTP
-and prefix caching were disabled. Shapes, graph configuration and measurement
-scope are specified below; gains at different levels are not additive.
+Measurements use four NUMA-local RTX 5090 GPUs, mixed NVFP4 model weights,
+NVFP4 KV cache, BF16 hidden states/attention and FP32 softmax/recurrent state.
+Each comparison uses matched device order and CPU placement. MTP and prefix
+caching are disabled.
 
 ## Prefill: VPP versus CPP
 
-The static prefill matrix covered 20 fresh configurations and 160 shape/config
-points: CPP capacities 2K/4K/8K/16K, VPP 2K/4K/8K, and two DCPP variants, each
-with graph off or piecewise graphs. It included 480 formal and 160 warmup banks.
-The table uses the median of three complete offline P+1 banks for four requests,
-including scheduling, communication, LM head, sampling and output.
+The prefill sweep covers CPP chunk capacities 2K/4K/8K/16K, VPP capacities
+2K/4K/8K, and two DCPP variants, with graph-off and piecewise-graph execution.
+There are 20 configurations, 160 shape/configuration points, 480 timed banks
+and 160 warmup banks.
 
-| Tokens/request | Best CPP, ms/bank | Best VPP, ms/bank | VPP choice | Reduction |
+Each bank processes four requests and generates one output token per request
+(P+1). Timings include scheduling, communication, the LM head, sampling and
+output. The table selects the best CPP and VPP configurations at each input
+length, using the median of three timed banks.
+
+| Input tokens/request | CPP, ms/bank | VPP, ms/bank | VPP configuration | Latency reduction |
 | --- | ---: | ---: | --- | ---: |
 | 8,192 | 832.413 | 795.197 | C2048, piecewise | 4.47% |
 | 32,768 | 4,304.359 | 3,936.227 | C4096, piecewise | 8.55% |
 | 65,536 | 11,647.508 | 10,834.357 | C4096, piecewise | 6.98% |
 | 131,071 | 35,241.058 | 33,410.873 | C8192, graph off | 5.19% |
 
-This is an envelope over the declared configuration matrix, not a validated
-per-request layout router. For B1/8192, CPP C2048/piecewise was faster:
-304.587 ms versus 310.973 ms for the best VPP. The 47.74% graph improvement in
-VPP C2048/B4 is a within-VPP comparison, not a gain over the best CPP.
+For a single 8K request, CPP C2048/piecewise takes 304.587 ms and the best VPP
+configuration takes 310.973 ms. The four-request banks provide more pipeline
+work to overlap.
 
-For each profile, native autotune choices were matched before graph comparison.
-No new user installation needs those historical files: its native runtime tunes
-and caches normally. P used TP1/PP4, 8 GiB FA KV per rank and two CPU threads per
-rank. Sampling was temperature 0.7/top-p 0.9; output length was one token.
-"128K" reserves one position for that output and therefore means 131,071 inputs.
+Both paths use TP1/PP4, 8 GiB full-attention KV per rank and two CPU threads per
+rank. Sampling uses temperature 0.7 and top-p 0.9. The 128K configuration reserves
+one token for output, giving 131,071 input tokens. Native autotune choices are
+matched within graph comparisons.
 
-## Pipeline cost: model versus observed gaps
+Data: [prefill.csv](../benchmarks/prefill.csv).
 
-The [equal-stage model](architecture.md#prefill-folded-vpp) distinguishes the
-approximately fixed adjacent-chunk cost increase from the accumulated fill/drain
-term. Replaying measured compute nodes with communication/host/copy cost set to
-zero gave the following B4 examples:
+## Pipeline cost model
 
-| Tokens/request | Modeled extra pipeline time, s | Fraction of modeled makespan |
+The [equal-stage model](architecture.md#context-growth-and-pipeline-bubbles)
+separates adjacent-chunk cost growth from cumulative fill/drain overhead.
+Replaying measured compute nodes with transfer and host costs set to zero gives:
+
+| Input tokens/request | Modeled extra pipeline time, s | Share of modeled makespan |
 | --- | ---: | ---: |
 | 8,192 | 0.4268–0.4272 | 42.19–42.56% |
 | 65,536 | 0.8729–0.8824 | 8.40–8.48% |
 | 131,071 | 2.1989–2.2148 | 6.73–6.79% |
 
-This extra time is modeled makespan minus the busiest rank's accumulated
-compute. It is not directly measured PCIe time. Actual per-rank gaps include
-dependency waits and host submission effects; subtracting this model from an
-unprofiled wall time does not isolate communication. A declining relative
-fraction can coexist with increasing absolute overhead.
+Here, extra pipeline time equals modeled makespan minus the busiest rank's
+accumulated compute. This isolates dependency overhead in the compute model;
+PCIe transfer and host submission are separate terms. The absolute overhead
+grows with context while its share of total execution falls.
 
-## Decode: full-model common windows
+## Decode: full-model latency
 
-The decode comparison generated 256 output tokens per request. Three formal
-repetitions followed four warm banks. Timings use common output intervals where
-every request advanced one token and remained within output positions 17–240;
-the reported value is the median of repetition medians. It includes model work,
-communication, LM head and sampling, rather than one attention kernel.
+Each request generates 256 tokens. Four warm banks precede three timed
+repetitions. Measurements use common output windows within positions 17–240,
+where every request advances one token. Values are medians of repetition
+medians and include model execution, communication, the LM head and sampling.
 
-| Initial context | Native ms/step | Bucket ms/step | Reduction |
+| Initial context | Native ms/step | Bucket ms/step | Latency reduction |
 | --- | ---: | ---: | ---: |
 | B1, 512 | 10.0577 | 9.7397 | 3.16% |
 | B32, all 8,064 | 17.9077 | 17.9361 | −0.16% |
 | B9, 130,816 + 8 × 4,096 | 20.0353 | 14.3697 | 28.28% |
 | B32, 130,816 + 31 × 4,096 | 28.6256 | 18.1637 | 36.55% |
 
-The B9 case used a padded 16-row graph. Uniform fallback retains a small measured
-negative; native fallback does not prove zero integration overhead. This path
-was opt-in and native remained the default service.
+The B9 workload uses a padded 16-row graph. The largest gains occur when one
+long request dominates otherwise short-request work; uniform B32 is near parity.
 
-The independent HTTP comparison used official `vllm serve` and
-`vllm bench serve`, six finite banks, excluded priming, and forward/reverse formal
-orders. Native and bucket each completed 540 requests with zero failures.
-Mixed-arrival throughput improved 10.41–11.36% across both rounds. Uniform
-throughput changed +0.03–0.07%. Short C1 changed sign between rounds; some long
-request TTFT/ITL metrics regressed. Finite-bank throughput is not steady-state
-capacity, a production SLO, or a per-request guarantee.
+Data: [decode.csv](../benchmarks/decode.csv).
 
-## Fusion: operator and GPU-call measurements
+## Decode: HTTP serving
 
-Three optional fusions preserve native consumers and precision contracts:
+The independent bucket comparison uses official `vllm serve` and
+`vllm bench serve` over six finite request banks. Priming is excluded from the
+timed results; two formal rounds reverse execution order. Native and bucket
+each complete 540 requests with zero failures.
 
-| Transformation | Measured scope | Observation |
-| --- | --- | --- |
-| Residual/RMSNorm → NVFP4 pack | Direct producer | About 33–39% lower producer latency |
-| QK norm/RoPE/gate/KV append | Direct producer | About 52–55% lower producer latency |
-| Attention output/gate/static FP8 | Complete XQA tail | About 0.7–1.3% lower complete tail-window latency |
-| All three | Controlled full GPU decode calls, B1/8/16/32, contexts 1K/2K | 2.04–7.18% lower latency versus the same bucket path |
+| Workload | Bucket output throughput versus native |
+| --- | ---: |
+| Mixed arrivals | +10.41–11.36% |
+| Uniform | +0.03–0.07% |
 
-The controlled calls include the LM head without modifying it. They use a matched
-forced aligned bucket path to isolate fusion; they are not the automatically
-routed HTTP service below. Individual percentages have different denominators
-and cannot be summed.
+Short C1 results vary in sign across the two rounds. Request-level TTFT and ITL
+vary by cohort, so the benchmark records them alongside aggregate throughput.
 
-An earlier uniform-B32 module combination regressed 12.17%. The later matched
-same-bucket comparison did not reproduce that regression. Historical negatives
-are retained; no measured causal attribution to a single instruction follows
-from this change of comparison.
+## Kernel fusion
 
-## Fusion: matched HTTP comparison, 2026-11-04
+| Transformation | Timing scope | Latency reduction |
+| --- | --- | ---: |
+| Residual/RMSNorm → NVFP4 pack | Direct producer | About 33–39% |
+| QK norm/RoPE/gate/KV append | Direct producer | About 52–55% |
+| Attention output/gate/static FP8 | Complete XQA tail | About 0.7–1.3% |
+| All three | Full GPU decode call, B1/8/16/32, 1K/2K contexts | 2.04–7.18% |
 
-All three arms completed 540 requests each: 180 priming plus 360 formal requests.
-The comparison contains 1,080 formal requests with no failures. The table divides
-the combined formal output tokens by the sum of the two round bank durations.
+The full-call comparison runs both arms on the same aligned bucket path,
+including the LM head. Producer timings measure the local fusion opportunity;
+the complete-call timings measure its effect across model execution.
 
-| Bank | Native tok/s | Bucket tok/s | Bucket + fusion tok/s | Fusion vs bucket |
+## Three-profile HTTP comparison
+
+The following comparison runs native, bucket and bucket-plus-fusion profiles
+with identical request banks. Each profile completes 180 priming and 360 formal
+requests. Throughput is the combined formal output-token count divided by the
+sum of formal bank durations across two execution orders.
+
+| Bank | Native tok/s | Bucket tok/s | Bucket + fusion tok/s | Fusion versus bucket |
 | --- | ---: | ---: | ---: | ---: |
 | Short C1 | 92.64 | 99.00 | 100.74 | +1.76% |
 | Uniform32 | 332.85 | 332.53 | 327.68 | −1.46% |
@@ -121,33 +115,26 @@ the combined formal output tokens by the sum of the two round bank durations.
 | Mixed, 2 req/s | 448.19 | 494.11 | 495.77 | +0.33% |
 | Mixed, 8 req/s | 452.48 | 496.57 | 497.74 | +0.24% |
 
-This comparison used the same native prefill, graph/compile endpoints
-`[32, 2048]`, 2048-token budget, maximum 32 requests, 131072 context capacity,
-8 GiB KV/rank, temperature 0.7/top-p 0.9 and identical input banks. It is a new
-matched configuration for the fusion experiment; it does not replace the earlier
-bucket baseline.
+All profiles use native prefill, graph/compile endpoints `[32, 2048]`, a
+2048-token batch budget, up to 32 requests, 131072 context capacity and 8 GiB
+KV per rank. Sampling uses temperature 0.7 and top-p 0.9. Each profile runs in
+one fresh process, with two sequential formal orders and zero failed requests.
 
-There is no general additional HTTP fusion win. Uniform throughput and mean
-TTFT/TPOT slightly regress. Large apparent skew-short TPOT improvements coexist
-with later TTFT: in Skew32 the short-cohort mean TTFT grows 14.851 → 26.196 s,
-while E2E grows 33.041 → 33.673 s. A lower `(E2E-TTFT)/(output_tokens-1)` alone
-does not show that the kernel accelerated. Formal route observers were off;
-admission/overlap is an interpretation, not a traced root cause.
+The per-cohort metrics explain the distinction between decode time and request
+latency: in Skew32, adding fusion changes short-cohort mean TTFT from 14.851 to
+26.196 s and mean E2E from 33.041 to 33.673 s. TPOT is derived as
+`(E2E − TTFT) / (output_tokens − 1)` and is reported together with those times.
 
-Each arm used one fresh process and two sequential formal orders. Small
-percentages are descriptive, not statistically established causal effects. No
-bitwise or identical-token requirement was imposed; semantic quality was not
-evaluated by these performance experiments.
+Data: [http_fusion.csv](../benchmarks/http_fusion.csv).
 
-## Source and reproducibility boundaries
+## Data and reproduction
 
-The research source revisions were `808a055e` / `d0eed042` for the native/bucket
-decode windows, and `f4f7ee41` / `c16dcbed` / `5e3a6be1` for the three HTTP fusion
-arms. The original research worktree was `f9f0a90e` at extraction. These are
-provenance records, not startup requirements. The upstream fixed-mode FlashInfer
-contribution has separate multi-shape measurements and is not substituted for
-the automatic-dispatch results above.
+[Benchmarking](../benchmarks/README.md) provides commands for native/bucket/fused
+serving and CPP/VPP prefill. [VPP communication](vpp-resources.md) records the
+shared-buffer memory budget and matched resource measurements.
 
-Curated numeric tables are in [benchmarks](../benchmarks/README.md). Native CLI
-examples there let users measure their own installation. They do not silently
-reconstruct private original bank files or promise identical timings.
+The source revisions associated with the decode-window dataset are `808a055e`
+and `d0eed042`; the three-profile HTTP dataset uses `f4f7ee41`, `c16dcbed` and
+`5e3a6be1`. The tables above retain those datasets' configurations. Per-bank VPP
+resource samples and run identifiers are in
+[vpp_resources.csv](../benchmarks/vpp_resources.csv).

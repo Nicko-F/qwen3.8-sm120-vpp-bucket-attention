@@ -1,292 +1,161 @@
-# Rank-shared VPP communication resources
+# VPP communication
 
-## Decision and fixed contracts
+The segmented-DMA transport overlaps stage computation with device-to-host and
+host-to-device copies. Forward and return traversals share a rank-level device
+buffer pool and copy streams, while each wire edge maintains its own ordering
+and control state.
 
-Keep the eight virtual stages, TP1/PP4 folded layer layout, W=7 admission,
-7/5/3/1 warmup, Forward/Return FIFO order, native model mathematics and graphs.
-This change reorganizes communication resources, not pipeline scheduling.
+## Streams and dataflow
 
-The starting implementation at `f2bea4e` allocates a seven-slot device pool per
-edge endpoint (`native/stages.py`). Middle ranks own four pools. One source
-stream is already shared, but incoming edges create separate receive streams.
-`receive()` only submits H2D when the stage requests its input; posting a Gloo
-header in `admit()` is not payload prefetch.
+Each rank uses one main compute stream, one D2H send stream, one H2D receive
+stream and a C++ progress thread. The eight virtual stages retain the seven-batch
+in-flight window, 7/5/3/1 warmup and interleaved forward/return order described
+in [architecture](architecture.md#prefill-folded-vpp).
 
-Source facts come from `native/{stages.py,control.py,device_pool.cpp,dma_edge.cpp}`
-and `layout.py`. Existing segmented DMA uses one bounded C++ progress thread per
-rank, eight 16 MiB host segments per edge, generation-specific CUDA IPC events,
-and READY/ACK publication. Reuse this mechanism and its completion discipline.
+```mermaid
+flowchart LR
+    C[Compute stage] --> S[Shared source slots: 2]
+    S --> D[D2H stream]
+    D --> R[Registered host ring]
+    R --> H[H2D stream]
+    H --> I[Shared receive slots: 3]
+    I --> N[Next stage compute]
+```
 
-## Dataflow and resource budget
+A producer writes BF16 hidden states and residuals directly into a source slot.
+CUDA plane-ready events let D2H start as each output becomes available. Data
+passes through an eight-segment host ring, with 16 MiB per segment. READY/ACK
+publications connect source progress to destination H2D. CUDA copy engines
+perform the transfers; the progress thread advances descriptors and events.
 
-- Use the existing serialized compute stream, one shared D2H send stream, and
-  one shared H2D receive stream per rank. Do not allocate unused per-pool copy
-  streams on this path. Native framework auxiliary streams are outside this
-  transport budget.
-- Allocate one rank-level source arena with two physical slots and one receive
-  arena with three physical slots. Retain separate per-edge sequence, batch,
-  generation and control metadata. Logical wire slots need not equal physical
-  device slots; never use a physical slot number as another edge's wire identity.
-  Allocate both arenas once at transport initialization. The hot path borrows
-  fixed-address views; it does not grow, resize or cudaMalloc/free communication
-  buffers per chunk. Dynamic ownership is distinct from dynamic allocation.
-- Logical endpoint pools may remain lightweight views over those arenas. They
-  must not each allocate payload storage. A physical lease is returned only
-  after its own D2H completion (source) or final consumer event (destination).
-  All endpoints sharing an arena must be progressed during credit waits.
-- Preserve direct hidden/residual output publication and its current-generation
-  plane events. Do not introduce a staging clone to achieve memory savings.
-- Prefetch input across both directions using admitted FIFO headers and upcoming
-  local-stage priority. At most two unconsumed speculative receives may occupy
-  the three-slot arena; preserve room for the demanded input after the previous
-  consumer finishes. Never block on an unavailable future header or enqueue a
-  receive-stream wait for a generation whose record has not been published.
-  Do not rely on Gloo `Work.is_completed()` for receive readiness: receive Work
-  implementations may finalize only in `wait()`. Instead, under the existing
-  DMA progress mutex, acquire the next segment's READY publication and inspect
-  its stable 96-byte wire descriptor. Validate it against that edge's admitted
-  FIFO before reserving a physical receive slot. Peeking must not advance ACK,
-  segment or sequence. Keep the original Gloo Work/header buffer owned; demand
-  consumption waits for and cross-checks that header before exposing the input.
-  Limit speculation to one unconsumed receive per incoming edge (two total on
-  middle ranks). No additional header thread or CUDA synchronization is needed.
-- Keep the existing host ring: 8 x 16 MiB per edge, not a full chunk per logical
-  in-flight entry. This change does not merge the six independent host/control
-  channels or change their ACK/event-reuse rules.
+The host ring is per edge. Segmentation pipelines large boundaries through
+bounded storage: a C8192 hidden/residual pair is 160 MiB, while the ring holds
+128 MiB and recycles segments after destination completion.
 
-For BF16 hidden and residual of width 5120, one slot is
-`capacity * 5120 * 2 * 2` bytes. At C8192 that is 160 MiB. Middle-rank device
-payload changes from `4 * 7 * 160 = 4480 MiB` to `5 * 160 = 800 MiB`, saving
-3680 MiB (3.59375 GiB). At C2048 it changes from 1120 to 200 MiB. These are
-communication payload allocations, not total model VRAM or host-ring storage.
-Edge ranks previously had two endpoint pools; report their savings separately.
+## Shared device slots
 
-The complete group's latency can first be assessed after shared allocation,
-shared streams and cross-direction prefetch all work together. A pool-only
-intermediate implementation is not a completed performance candidate.
+The rank-level pool contains two source slots and three receive slots, allocated
+at transport initialization. Both traversals borrow fixed-address views from
+these arenas. The compute stream serializes local stages, allowing the current
+output to transfer while the next output uses the other source slot.
 
-## Edit and reuse boundary
+Three receive slots hold the active input and up to two prefetched inputs.
+Prefetch considers both incoming directions and local stage priority, with one
+unconsumed speculative input per incoming edge. This lookahead keeps return
+traffic progressing alongside forward traffic.
 
-Change VPP transport/storage/control, its worker hooks, configuration, focused
-tests and documentation. Keep native CPP, Decode/bucket/fusion, model layers,
-sampling, parallel layout and existing performance tables unchanged. Retain
-the edge-owned resource layout as an explicit matched diagnostic control;
-default the completed segmented-DMA path to rank-shared resources. No paths,
-physical device IDs, run names or source hashes belong in library contracts.
+The logical W=7 admission window tracks in-flight work. Physical slot capacity
+tracks the outputs being sent and inputs being consumed at one rank; these
+resources have separate lifetimes.
 
-## Focused evidence, without a new full benchmark
+| Resource | Acquire | Release |
+| --- | --- | --- |
+| Source slot | Before producing a boundary output | After its D2H completes |
+| Host-ring segment | Before D2H writes the segment | After destination H2D completion and ACK |
+| Receive slot | After a matching input descriptor is ready | After the stage's final consumer event |
 
-1. CPU ownership/control tests and one bounded GPU transport test: both
-   directions, more than seven messages, slot reuse, varying valid rows and
-   delayed readiness. Check payload identity, generation rejection, no live
-   leases at close, peak arena occupancy and credit-stall counters.
-2. Installed model anchor using the same four selected idle GPUs in one NUMA
-   domain. Compare edge-owned and rank-shared layouts at C2048 with 4 x 8K
-   prompts, and C8192 with 4 x 32K prompts. These each exercise 16 chunks;
-   retain W=7 and the same model/runtime/tactic settings. Fix native KV allocation
-   to 6 GiB/rank and max sequences to eight on both layouts so freed communication
-   memory does not merely enlarge native KV allocation. Reuse one loaded engine
-   per layout/capacity; one warm bank and three timed banks are sufficient.
-3. Record actual unique device-payload allocation, total peak VRAM, arena
-   peak-live, per-direction prefetch/issue counters, source/destination credit
-   waits and complete-bank latency. Native CUDA-event and transport receipts
-   establish ownership and prefetch; profiler/full curves are not required.
-4. Compare medians and ranges. Do not describe tiny noisy differences as a gain,
-   or attribute a regression to the original algorithm without diagnosis. Token
-   equality is not a gate for this resource refactor. Complete every request and
-   inspect transport correctness and teardown.
+Credits bound outstanding use. Slot generations distinguish reuse, while batch,
+sequence, READY/ACK and wire identities stay edge-local. The compute stream
+waits on the matching receive event; the send stream waits on the producer's
+plane-ready event.
 
-All remote work stays below the private workspace, with bounded threads/build
-parallelism, finite timeout/heartbeat, >=128 GiB MemAvailable and task-owned
-cleanup. Only the selected four cards must be idle; preserve one NUMA domain.
-Record revisions as provenance, not runtime permission gates. Commit code and
-results in this repository; preserve the old baseline through Git.
+### Cross-direction prefetch
 
-## Measured transport check
+The control path admits FIFO headers for each edge. The progress thread checks
+the next segment's READY publication and stable 96-byte descriptor under its
+existing mutex, then reserves a receive slot for a matching admitted input.
+Peeking leaves sequence and ACK state intact. When the stage consumes the
+input, it completes the original Gloo header receive and cross-checks its
+identity before exposing the tensors.
 
-The C8192 rank-shared transport check completed on four NUMA-local RTX 5090s.
-It sent 20 messages over each of six edges (120 boundary receives), with valid
-row counts 0, 1, 17, 4096 and 8192, delayed plane publication and logical-slot
-wraparound. Each rank rejected reuse of a retired ticket. The library source
-was `8161a2d`; the completed test script was `8e68e9b`.
+## Memory budget
 
-| Rank | Physical payload | Source peak | Receive peak | Forward / return prefetched and consumed | Blocking source credit waits |
-| --- | --- | --- | --- | --- | --- |
-| 0 | 800 MiB | 2 | 2 | 0 / 2 | 2 |
-| 1 | 800 MiB | 1 | 3 | 18 / 12 | 0 |
-| 2 | 800 MiB | 2 | 3 | 14 / 18 | 1 |
-| 3 | 800 MiB | 1 | 2 | 9 / 0 | 0 |
+For chunk capacity C and hidden width 5120, a BF16 hidden/residual slot occupies:
 
-All ranks used one compute, one D2H and one H2D transport stream. Speculative
-receive occupancy peaked at two on middle ranks. No destination credit wait
-occurred. The third receive slot was actually used; reducing its capacity to
-two is not justified by this check. Stress credit waits are not model latency.
-After bounded collective close, every arena, endpoint, producer, input lease and
-prefetch queue had zero live ownership. The process exited 0 and its owned
-session was empty after cleanup.
+```text
+slot_bytes = C × 5120 × 2 tensors × 2 bytes
+rank_payload = (2 source + 3 receive) × slot_bytes
+```
 
-Two initial fixture failures were retained: checking zero ownership immediately
-after a single device synchronization was too early for a background DMA queue;
-the retired-ticket probe also needed to recognize pybind's `ValueError` mapping
-for `std::invalid_argument`. The completed check verifies ownership after the
-existing transport drain and accepts only the intended stale-ticket rejection.
-Neither fix changed the library, model or stage order.
+| Capacity | Slot size | Shared payload/rank | Edge-owned middle-rank payload | Saved/middle rank |
+| --- | ---: | ---: | ---: | ---: |
+| C2048 | 40 MiB | 200 MiB | 1120 MiB | 0.898438 GiB |
+| C8192 | 160 MiB | 800 MiB | 4480 MiB | 3.593750 GiB |
 
-Evidence run: `public_vpp-resources_20261104T172246_927812Z`. Raw machine logs
-stay in the private run archive; this document records the portable summary.
+At C8192, the middle-rank communication payload falls by 82.1%. Outer ranks save
+1.40625 GiB each, giving 10 GiB across four GPUs. Payload capacity stays constant
+as context length grows; longer inputs traverse the same buffers more times.
+Model weights, KV cache, graph scratch and host-ring storage are budgeted
+separately. vLLM can use released GPU headroom for KV cache when its memory
+budget is automatic.
 
-## Matched model checks
+`--resource-layout rank` is the default DMA layout. The `edge` layout provides
+an independently owned pool at each endpoint for comparisons.
 
-Four configuration points completed, each with one warm bank and three timed
-banks. These are focused resource checks, not a rerun of the historical full
-benchmark. Both layouts used the same ordered four NUMA-local RTX 5090s, the
-same model/runtime and default native tactics, a fixed 6 GiB KV allocation per
-rank, eight maximum sequences and disabled prefix caching. Actual KV allocation
-was identical: 502 blocks with block size 2784. Each bank contained four P+1
-requests and 16 input chunks in total.
+## Transport tests
 
-| Capacity | Prompt tokens/request | Layout | Median bank (s) | Timed range (s) |
-| --- | --- | --- | --- | --- |
-| 2048 | 8192 | Edge-owned | 1.450957 | 1.447842–1.458284 |
-| 2048 | 8192 | Rank-shared | 0.883493 | 0.881769–1.442930 |
-| 8192 | 32768 | Edge-owned | 7.028552 | 7.018437–7.032519 |
-| 8192 | 32768 | Rank-shared | 4.564127 | 4.557483–7.006229 |
+The C8192 test sends 20 messages over each of six edges, covering 120 boundary
+receives. Valid row counts are 0, 1, 17, 4096 and 8192. It exercises delayed plane
+publication, logical-slot wraparound, retired-ticket rejection and final drain.
 
-The observed median reductions are 39.1% and 35.1%. Both shared-layout samples
-include a much slower bank near the control's latency; those samples remain in
-the [CSV](../benchmarks/vpp_resources.csv). The cause of this variability was not
-isolated. These measurements show no end-to-end loss in the two checked cases;
-they do not establish a stable speedup across loads or context lengths. Any gain
-belongs to the combined resource/stream/prefetch change, not buffer reduction
-alone. Model loading, compilation and the warm bank are outside bank timing.
+| Rank | Device payload | Peak source slots | Peak receive slots | Forward / return prefetched and consumed |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 800 MiB | 2 | 2 | 0 / 2 |
+| 1 | 800 MiB | 1 | 3 | 18 / 12 |
+| 2 | 800 MiB | 2 | 3 | 14 / 18 |
+| 3 | 800 MiB | 1 | 2 | 9 / 0 |
 
-| Capacity | Middle-rank edge payload | Middle-rank shared payload | Saved/rank | Middle-rank peak allocated: edge / shared |
-| --- | --- | --- | --- | --- |
-| 2048 | 1120 MiB | 200 MiB | 0.898438 GiB | 15.869829 / 14.971391 GiB |
-| 8192 | 4480 MiB | 800 MiB | 3.593750 GiB | 22.167905 / 18.574155 GiB |
+Speculative occupancy reaches two on middle ranks; all slots and queues drain
+to zero live ownership. The test uses library revision `8161a2d` and test
+revision `8e68e9b`.
 
-The allocated-peak columns use `torch.cuda.max_memory_allocated` over the worker
-lifecycle, including model loading/profile/warmup. They are not just buffer
-capacity or allocator-reserved memory. The per-rank allocation differences
-exactly match the payload-budget differences with KV held fixed. At C8192,
-outer ranks save 1.40625 GiB each; all four ranks together save 10 GiB of fixed
-communication payload. Middle-rank payload falls by 82.1%. Normal deployments
-may use the released headroom to enlarge native KV, so total VRAM need not fall
-by the same amount when its allocation remains automatic.
+## Model measurements
 
-All six source edges reported 68 direct publications and zero staged
-publications in every configuration. The endpoint sequences and per-rank
-receive counts also matched. No output-staging copy was added to obtain the
-memory reduction. Every run completed its banks, closed the transport with zero
-live ownership, exited 0 and released its owned process session.
+Each point processes four P+1 requests, with one warm bank and three timed
+banks. Both layouts use the same NUMA-local GPUs, default native tactics,
+6 GiB KV per rank and a maximum of eight sequences. Timings cover the complete
+bank after loading and compilation.
 
-Native vLLM teardown still emitted forced-EngineCore-termination warnings; the
-C2048 shared run additionally reported a forced worker termination and a shared
-memory cleanup warning. These logs are retained. Transport ownership drained
-successfully, but fully graceful native-engine shutdown is not claimed.
+| Capacity | Input/request | Edge median, s | Shared median, s | Edge range, s | Shared range, s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C2048 | 8192 | 1.450957 | 0.883493 | 1.447842–1.458284 | 0.881769–1.442930 |
+| C8192 | 32768 | 7.028552 | 4.564127 | 7.018437–7.032519 | 4.557483–7.006229 |
+| C8192 | 65536 | 11.476845 | 11.490873 | 11.433025–11.496515 | 11.454258–11.508391 |
+| C8192 | 131072 | 34.455116 | 34.466631 | 34.452177–34.469092 | 34.461896–34.478624 |
+
+Short-bank shared timings include a slow sample near the edge-owned timing.
+At 64K and 128K the ranges overlap, with effectively unchanged latency and the
+same fixed memory savings. All individual samples are in
+[vpp_resources.csv](../benchmarks/vpp_resources.csv).
+
+| Capacity / input | Middle-rank peak allocated, edge | Middle-rank peak allocated, shared |
+| --- | ---: | ---: |
+| C2048 / 8K | 15.869829 GiB | 14.971391 GiB |
+| C8192 / 32K | 22.167905 GiB | 18.574155 GiB |
+| C8192 / 64K | 22.167967 GiB | 18.574217 GiB |
+| C8192 / 128K | 22.168091 GiB | 18.574341 GiB |
+
+Peak allocated memory is `torch.cuda.max_memory_allocated` over model loading,
+profiling and execution. KV allocation remains fixed at 502 native cache blocks
+with a 2784-token full-attention block size. At 64K and 128K, native hybrid-cache
+capacity is 1,218,502 and 1,290,169 tokens respectively.
 
 ### Occupancy and backpressure
 
-The shared model path reached source occupancy two and receive occupancy three.
-Both C2048 layouts and the C8192 edge-owned control had zero blocking slot-credit
-waits. C8192 rank-shared had the following cumulative waits:
+Model execution reaches the configured two-source/three-receive occupancy.
+Credit waiting bounds host enqueueing while the GPU produces and transfers
+outputs. These counters accumulate across ranks and setup/warm/timed phases:
 
-| Rank | Source waits | Source wait (ms) | Receive waits | Receive wait (ms) |
-| --- | --- | --- | --- | --- |
-| 0 | 17 | 1351.320 | 0 | 0 |
-| 1 | 27 | 1216.830 | 3 | 62.374 |
-| 2 | 29 | 2221.144 | 0 | 0 |
-| 3 | 0 | 0 | 0 | 0 |
+| Input/request | Shared source waits | Source wait sum, ms | Shared receive waits | Receive wait sum, ms |
+| --- | ---: | ---: | ---: | ---: |
+| 32768 | 73 | 4789.294 | 3 | 62.374 |
+| 65536 | 281 | 18913.872 | 0 | 0 |
+| 131072 | 493 | 64011.216 | 2 | 298.295 |
 
-These counters include native warmup, the warm bank and all three timed banks.
-They measure host credit waiting; source credit also remains owned while its
-producer is computing. Waits on different ranks can overlap compute and one
-another. Their sum is not additional bank latency or isolated D2H time.
+Waits overlap with compute and with waits on other ranks, so they describe
+host backpressure separately from the bank times above. All six edges publish
+outputs directly: 68 publications per edge at 8K/32K, 132 at 64K and 260 at
+128K. Each run completes its requests and drains transport ownership.
 
-The C8192 edge-owned model actually reached source occupancy five on rank 0
-and receive occupancy three on several edges. Earlier observations of one or
-two slots were therefore not a universal bound. The two-source-slot design
-limits host enqueueing with backpressure; the current bank results support
-keeping it, without claiming that two slots can never limit another workload.
-
-Reproduce these points with `benchmarks/vpp_resources.py`; run IDs and all
-individual timing samples are in the CSV. The bounded checks are complete;
-no full curves or additional tuning sweep were run.
-
-## Long-context follow-up plan
-
-Extend only the focused resource comparison to four 65536-token and four
-131072-token P+1 requests, holding capacity at 8192. Compare edge-owned and
-rank-shared layouts at each length: four configuration points, one warm bank
-and three timed banks per point. Keep the same ordered NUMA-local four GPUs,
-6 GiB KV/rank, maximum eight sequences, default native tactics, model precision,
-graphs, W=7 and stage order. The checkpoint declares 262144 maximum text
-positions, so input plus one output fits without a context-limit override.
-
-The previous cache supplied 502 blocks with a 2784-token full-attention block
-size: four 128K inputs need 192 full-attention blocks, plus recurrent-group and
-rounding overhead. The native prior run reported 1,096,669 tokens of cache
-capacity; verify the new lengths' native capacity and actual allocation
-receipts rather than ignoring the hybrid cache groups. Physical communication buffers remain 800 MiB/rank at C8192
-regardless of context length; only the number of traversing chunks grows (32
-and 64 per bank). Longer-history full-attention compute grows while the bytes
-per chunk stay fixed. The relative benefit and backpressure therefore require
-measurement; neither monotonically increasing gains nor zero credit waits are
-assumed.
-
-Reuse `benchmarks/vpp_resources.py`, adding an optional prompt-token argument
-whose default preserves the prior workloads. Do not change the installed
-library, allocator, transport, pipeline or math. Use the existing private
-supervisor and serial four-card launches with the 128 GiB available-memory
-floor, bounded threads, finite timeout and owned-session cleanup. Record all
-bank samples, exact input lengths, allocator peaks, credit/prefetch counts,
-matched output publication counts and drained close receipts. Preserve the
-earlier observations and append these longer points separately.
-
-## Long-context measurements
-
-The 64K and 128K pairs completed with the same library implementation as the earlier
-checks. Only the benchmark's optional input-length parameter changed
-(`d359b15`). These points retain C8192, four requests, one warm bank, three
-timed banks, ordered NUMA-local GPUs and 6 GiB KV/rank.
-
-| Input/request | Edge median (s) | Shared median (s) | Shared latency change | Edge range (s) | Shared range (s) |
-| --- | --- | --- | --- | --- | --- |
-| 65536 | 11.476845 | 11.490873 | +0.12% | 11.433025–11.496515 | 11.454258–11.508391 |
-| 131072 | 34.455116 | 34.466631 | +0.03% | 34.452177–34.469092 | 34.461896–34.478624 |
-
-The distributions overlap at both lengths. These small differences are
-consistent with a tie; the short-bank median gains do not extend to these
-longer banks. Communication
-payload remains 4480 versus 800 MiB on middle ranks. Their allocated peaks are
-22.167967 versus 18.574217 GiB at 64K and 22.168091 versus 18.574341 GiB at
-128K, retaining the exact 3.59375 GiB saving. The defensible long-context benefit
-is the fixed memory reduction with effectively unchanged measured bank latency.
-
-Native cache capacity was 1,218,502 tokens, with 18.59x capacity concurrency at
-65537 configured tokens and group sizes `(65537,65537,65537,2784)`. At 128K it
-was 1,290,169 tokens, 9.84x concurrency at 131073 configured tokens and group
-sizes `(131073,131073,131073,2784)`. All four points had 502 cache blocks and
-no observed preemption messages. All source edges reported 132 direct
-publications at 64K and 260 at 128K, matching both layouts' sequences, with
-zero staged publications. All banks completed and transport ownership drained
-to zero; all owned process sessions were empty after cleanup. Native teardown
-warnings remain retained, as in the earlier checks.
-
-The shared 64K check accumulated 281 blocking credit waits (18,913.872 ms summed
-across ranks and setup/warm/timed phases), all on the source side; the control
-had none. Host enqueue backpressure therefore increased while bank latency
-stayed effectively unchanged. This is direct evidence that cumulative host
-credit-wait duration must not be counted as extra end-to-end delay. Shared
-source occupancy remained two and receive occupancy peaked at three.
-
-At 128K, shared source credit waits totaled 493 calls and 64,011.216 ms across
-all ranks/phases, plus two receive waits totaling 298.295 ms. The control again
-had no blocking slot-credit waits. Buffer occupancy remained bounded at two
-source and three receive slots. The result again distinguishes host enqueue
-backpressure from lost GPU throughput; these cumulative waits are not additive
-bank delay.
-
-The [CSV](../benchmarks/vpp_resources.csv) now includes all original and
-long-context samples. No implementation tuning, profiler runs, extra repetitions
-or full benchmark curves were added to this follow-up.
+[Benchmarking](../benchmarks/README.md#vpp-transport-and-resource-comparison) contains the
+transport and model commands.
