@@ -180,43 +180,6 @@
   $('#pipe-growth').addEventListener('change',e=>{pipeState.growth=+e.target.value;renderPipe(true);});
   $('#pipe-highlight').addEventListener('change',e=>{pipeState.highlight=+e.target.value;renderPipe(true);});
 
-  // ---------- Rank resources ----------
-  let rankStep=0;
-  function renderRank(animate=false){
-    const id='rank-diagram';steps('rank-steps',[msg('overview'),msg('rank.receive'),msg('rank.compute'),msg('rank.send'),msg('rank.reuse')],rankStep,i=>{rankStep=i;renderRank(true);});
-    const active=(n)=>rankStep===0||rankStep===n;let a='';
-    a+=rect(193,48,565,287,'transparent','var(--border)',12)+tx(211,72,'GPU1 / RANK 1','diagram-title')+tx(740,72,'S1 · S6','diagram-small diagram-mono','text-anchor="end"');
-    a+=box(15,92,150,66,msg('rank.from0'),'Forward / Edge0',active(1));
-    a+=box(15,218,150,66,msg('rank.from2'),'Return / Edge5',active(1));
-    a+=tx(87,185,msg('rank.edgeRings'),'diagram-small','text-anchor="middle"');
-    a+=box(214,117,125,58,'H2D Stream',msg('rank.shared'),active(1));
-    a+=rect(367,100,175,105,active(1)?'var(--accent-soft)':'var(--panel-2)',active(1)?'var(--accent)':'var(--border)',7);
-    a+=tx(454,122,'Receive Arena','diagram-title','text-anchor="middle"');
-    [msg('rank.current'),msg('rank.ahead1'),msg('rank.ahead2')].forEach((t,i)=>{a+=rect(380,132+i*22,149,17,i===0?'var(--blue-soft)':'transparent','var(--border)',3)+tx(454,144+i*22,t,'diagram-small diagram-mono','text-anchor="middle"');});
-    a+=box(367,249,175,61,'Compute Stream',msg('rank.interleave'),active(2));
-    a+=rect(581,230,151,88,active(3)?'var(--accent-soft)':'var(--panel-2)',active(3)?'var(--accent)':'var(--border)',7);
-    a+=tx(656,251,'Source Arena','diagram-title','text-anchor="middle"');
-    a+=rect(592,264,62,37,'transparent','var(--border)',4)+rect(660,264,62,37,'transparent','var(--border)',4);
-    a+=tx(623,279,'Slot 0','diagram-small diagram-mono','text-anchor="middle"')+tx(623,293,msg('rank.sendPrev'),'diagram-small','text-anchor="middle"')+tx(691,279,'Slot 1','diagram-small diagram-mono','text-anchor="middle"')+tx(691,293,msg('rank.writeNext'),'diagram-small','text-anchor="middle"');
-    a+=box(581,117,151,58,'D2H Stream',msg('rank.shared'),active(3));
-    a+=box(795,92,150,66,msg('rank.to2'),'Forward / Edge1',active(3));a+=box(795,218,150,66,msg('rank.to0'),'Return / Edge6',active(3));
-    a+=tx(870,185,msg('rank.edgeRings'),'diagram-small','text-anchor="middle"');
-    a+=path('M165 125 H190 V146 H214',active(1),id)+path('M165 250 H186 V146 H214',active(1),id);
-    a+=path('M339 146 H367',active(1),id)+path('M454 205 V249',active(2),id)+path('M542 279 H581',active(2),id)+path('M656 230 V175',active(3),id);
-    a+=path('M732 146 H774 V125 H795',active(3),id)+path('M732 146 H774 V251 H795',active(3),id);
-    a+=box(245,369,460,62,'Host · C++ Progress Thread',msg('rank.progress'),active(4));
-    a+=path('M275 369 V335 M473 369 V335 M657 369 V335',active(4),'','stroke-dasharray="4 5"');
-    a+=tx(480,456,msg('rank.capacity'),'diagram-caption','text-anchor="middle"');
-    svg(id,a,960,475,msg('rank.diagram'),animate);
-    const desc=[
-      msg('rank.overviewNote'),
-      msg('rank.receiveNote'),
-      msg('rank.computeNote'),
-      msg('rank.sendNote'),
-      msg('rank.reuseNote')
-    ];explanation('rank-explanation','RANK-LOCAL DATAFLOW',desc[rankStep]);
-  }
-
   // ---------- Segmented DMA timeline ----------
   let dmaStep=3;
   function renderDMA(animate=false){
@@ -443,9 +406,9 @@
   function barline(name,value,width,baseline){return `<div class="barline"><span class="barname">${name}</span><div class="bartrack"><div class="barfill ${baseline?'baseline':''}" style="width:${Math.min(100,width)}%"></div></div><span class="barvalue">${value}</span></div>`;}
   function renderPrefill(){const max=Math.max(...data.prefill.map(r=>+r.cpp_ms));$('#prefill-chart').innerHTML=data.prefill.map(r=>{const c=+r.cpp_ms,v=+r.vpp_ms,rel=prefillMetric==='relative',scale=rel?c:max;return msg('chart.prefillRow', r.input_tokens==='131071'?'128K':(+r.input_tokens/1024)+'K', fmt((c-v)/c*100), barline('CPP',rel?'100.0%':fmt(c/1000,3)+' s',c/scale*100,true), barline('VPP',rel?fmt(v/c*100,1)+'%':fmt(v/1000,3)+' s',v/scale*100,false));}).join('');$$('#prefill-metric button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===prefillMetric)));}
   $('#prefill-metric').addEventListener('click',e=>{const b=e.target.closest('button[data-value]');if(b){prefillMetric=b.dataset.value;renderPrefill();}});
-  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'≈128K + 8 × 4K','≈128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
+  function renderDecode(){const max=Math.max(...data.decode.map(r=>+r.native_ms));const labels=['B1 · 512',msg('chart.uniform'),'128K + 8 × 4K','128K + 31 × 4K'];$('#decode-chart').innerHTML=data.decode.map((r,i)=>{const n=+r.native_ms,b=+r.bucket_ms,g=(n-b)/n*100;return `<div class="bench-row"><div class="bench-row-title"><span>${labels[i]}</span><span class="bench-gain ${g<0?'neutral':''}">${g>=0?'−':'+'}${fmt(Math.abs(g))}%</span></div>${barline('Native',fmt(n,2)+' ms',n/max*100,true)}${barline('Bucket',fmt(b,2)+' ms',b/max*100,false)}</div>`;}).join('');}
 
-  renderPipe();renderRank();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
+  renderPipe();renderDMA();renderLoad();renderBucket();renderMerge();['norm','front','tail'].forEach(k=>renderFusion(k));renderPrefill();renderDecode();scrollUI();
   // Deterministic model functions are exposed for reproducibility and automated checks.
   window.BlogModel=Object.freeze({schedule,taskPlan,nativePlan,benchmarkData:data});
 })();

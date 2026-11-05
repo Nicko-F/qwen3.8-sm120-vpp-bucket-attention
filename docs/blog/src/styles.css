@@ -1040,6 +1040,224 @@ summary > span {
   flex: none;
 }
 
+/* A rank-local snapshot shares one time marker across three independent streams. */
+.rank-snapshot {
+  margin-block: 8px 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.rank-time-label, .rank-lane {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 16px;
+}
+
+.rank-time-label {
+  align-items: end;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rank-time-label > span:last-child {
+  justify-self: center;
+  color: var(--accent-strong);
+}
+
+.rank-lanes {
+  display: grid;
+  gap: 12px;
+}
+
+.rank-lane-label {
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rank-lane-label strong {
+  color: var(--ink);
+}
+
+.rank-lane-label > span {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.rank-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-block: 10px;
+  border-block: 1px solid var(--border);
+  background: linear-gradient(var(--accent), var(--accent)) center / 1px 100% no-repeat;
+}
+
+.rank-work {
+  position: relative;
+  width: 90%;
+  min-width: 0;
+  margin-inline-start: 5%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--trace-block-ink);
+  overflow-wrap: anywhere;
+}
+
+.rank-work > strong {
+  display: block;
+  text-align: center;
+  margin-bottom: 7px;
+}
+
+.rank-lane[data-stream=compute] .rank-work {
+  width: 86%;
+  margin-inline-start: 10%;
+}
+
+.rank-lane[data-stream=d2h] .rank-work {
+  width: 84%;
+  margin-inline-start: 2%;
+}
+
+.rank-receive { background: color-mix(in srgb, var(--trace-receive) 34%, var(--bg)); }
+.rank-compute { background: color-mix(in srgb, var(--trace-forward) 34%, var(--bg)); }
+.rank-send { background: color-mix(in srgb, var(--trace-send) 34%, var(--bg)); }
+
+.rank-transfer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.rank-stage-transfer {
+  grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr);
+}
+
+.rank-transfer b {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.rank-pools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-block: 24px 18px;
+}
+
+.rank-pool {
+  min-width: 0;
+}
+
+.rank-pool h5 {
+  margin: 0 0 10px;
+  font: 600 15px/1.6 var(--sans);
+  color: var(--ink);
+}
+
+.rank-pool h5 > span {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.rank-slots {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.rank-receive-slots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rank-source-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.rank-slot {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 9px 7px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.rank-slot:is(.rank-receive, .rank-compute, .rank-send) {
+  color: var(--trace-block-ink);
+}
+
+.rank-slot strong, .rank-slot > span {
+  display: block;
+}
+
+.rank-slot strong {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.rank-dependencies, .rank-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding-block: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.rank-dependencies > strong {
+  color: var(--ink);
+}
+
+.rank-control {
+  border-top-style: dashed;
+  color: var(--muted);
+}
+
+.rank-control strong {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+@container figure (max-width: 42rem) {
+  .rank-pools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container figure (max-width: 30rem) {
+  .rank-time-label, .rank-lane {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .rank-time-label > span:first-child {
+    text-align: center;
+  }
+
+  .rank-lane-label {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+
+  .rank-lane-label > span {
+    margin: 0;
+  }
+
+  .rank-work {
+    padding-inline: 9px;
+  }
+}
+
 .trace-pair {
   display: flex;
   flex-direction: column;

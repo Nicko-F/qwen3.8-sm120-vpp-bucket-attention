@@ -107,102 +107,6 @@
     "en": "Modeled time saved",
     "zh-CN": "模型完成时间变化"
   },
-  "rank.receive": {
-    "en": "Receive input",
-    "zh-CN": "接收输入"
-  },
-  "rank.compute": {
-    "en": "Run stage",
-    "zh-CN": "计算 Stage"
-  },
-  "rank.send": {
-    "en": "Send output",
-    "zh-CN": "发送输出"
-  },
-  "rank.reuse": {
-    "en": "Reuse slots",
-    "zh-CN": "回收复用"
-  },
-  "rank.from0": {
-    "en": "From GPU0",
-    "zh-CN": "来自 GPU0"
-  },
-  "rank.from2": {
-    "en": "From GPU2",
-    "zh-CN": "来自 GPU2"
-  },
-  "rank.edgeRings": {
-    "en": "Per-edge host rings",
-    "zh-CN": "各自的 Host Ring"
-  },
-  "rank.shared": {
-    "en": "Both directions",
-    "zh-CN": "两个方向共享"
-  },
-  "rank.current": {
-    "en": "Slot 0 · current",
-    "zh-CN": "Slot 0 · 当前输入"
-  },
-  "rank.ahead1": {
-    "en": "Slot 1 · prefetch",
-    "zh-CN": "Slot 1 · 提前接收"
-  },
-  "rank.ahead2": {
-    "en": "Slot 2 · prefetch",
-    "zh-CN": "Slot 2 · 提前接收"
-  },
-  "rank.interleave": {
-    "en": "Interleave S1 / S6",
-    "zh-CN": "S1 / S6 串行交错"
-  },
-  "rank.sendPrev": {
-    "en": "Send prior",
-    "zh-CN": "发送上一份"
-  },
-  "rank.writeNext": {
-    "en": "Write next",
-    "zh-CN": "写入下一份"
-  },
-  "rank.to2": {
-    "en": "To GPU2",
-    "zh-CN": "发往 GPU2"
-  },
-  "rank.to0": {
-    "en": "To GPU0",
-    "zh-CN": "发往 GPU0"
-  },
-  "rank.progress": {
-    "en": "Advance DMA and exchange READY / ACK",
-    "zh-CN": "推进 DMA / 交换 READY–ACK"
-  },
-  "rank.capacity": {
-    "en": "Fixed buffers with 8K chunks: 2 source + 3 receive slots = 800 MiB",
-    "zh-CN": "固定数据缓冲：2 × Source + 3 × Receive = 800 MiB"
-  },
-  "rank.diagram": {
-    "en": "GPU1 shared buffers and three CUDA streams",
-    "zh-CN": "GPU1的共享Buffer与三条Stream结构"
-  },
-  "rank.overviewNote": {
-    "en": "One compute stream runs both legs on each rank. The legs share two physical source slots and three receive slots. Each edge tracks its own sequence numbers and events.",
-    "zh-CN": "一个 Rank 以同一条 Compute Stream 执行 Forward 与 Return。发送共用 2 个物理 Slot，接收共用 3 个物理 Slot；各通信边保留自己的序列号和事件。"
-  },
-  "rank.receiveNote": {
-    "en": "The shared H2D stream writes incoming data from both legs to the receive arena. One slot supplies the running stage. The others prefetch admitted forward or return inputs in FIFO order.",
-    "zh-CN": "共享 H2D Stream 将两个方向的数据写进 Receive Arena。当前输入供计算使用，其余空间预取下一份 Forward / Return；预取按已准入的 FIFO 身份建立。"
-  },
-  "rank.computeNote": {
-    "en": "The compute stream waits for the matching receive event, runs S1 or S6, and records a consumer event after the stage has finished reading its input.",
-    "zh-CN": "Compute 等待对应的接收完成 Event，然后运行 S1 或 S6。Stage 的最后一次输入消费结束时，记录 Consumer Event。"
-  },
-  "rank.sendNote": {
-    "en": "A stage publishes its output in a source slot. When a captured stage returns separate storage, its output is copied into that slot. D2H can send the prior output while compute uses the other slot. Hidden and residual each have a ready event.",
-    "zh-CN": "Stage 在 Source Slot 中发布输出。若捕获的计算图返回独立存储，先将输出复制到该 Slot。D2H 搬运上一份输出时，下一项计算使用另一个 Slot；Hidden 和 Residual 各有就绪事件。"
-  },
-  "rank.reuseNote": {
-    "en": "D2H completion releases the source slot. The consumer event releases the receive slot. The host progress thread advances DMA and reuses each host segment after H2D completes.",
-    "zh-CN": "Host 侧按完成事件归还物理 Slot。Source 跟随 D2H 完成释放，Receive 跟随 Consumer Event 释放；Progress Thread 持续推进 DMA，并在 H2D 完成后复用 Host Segment。"
-  },
   "dma.ready": {
     "en": "Output ready",
     "zh-CN": "输出就绪"
@@ -268,8 +172,8 @@
     "zh-CN": "准备接收"
   },
   "dma.readyNote": {
-    "en": "GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the progress thread can prepare its segments.",
-    "zh-CN": "GPU0 的计算先后记录 Residual / Hidden 的 Plane-ready Event。Progress Thread 看到已就绪的 Plane，就能准备它对应的 Segment。"
+    "en": "GPU0 records separate ready events for the residual and hidden planes. As each plane becomes ready, the host proxy thread can prepare its segments.",
+    "zh-CN": "GPU0 的计算先后记录 Residual / Hidden 的 Plane-ready Event。主机代理线程按就绪事件准备对应的数据段。"
   },
   "dma.d2hNote": {
     "en": "The host queues one segment's D2H copy and its completion event on the send stream, then publishes READY with the event generation the receiver should wait for.",
@@ -712,8 +616,8 @@
     "zh-CN": "<div class=\"bench-row\"><div class=\"bench-row-title\"><span>{0} 输入 / 请求</span><span class=\"bench-gain\">−{1}%</span></div>{2}{3}</div>"
   },
   "chart.uniform": {
-    "en": "32 requests · ≈8K each",
-    "zh-CN": "32 个请求 · 每个约 8K"
+    "en": "32 × 8K",
+    "zh-CN": "32 × 8K"
   },
   "load.splits": {
     "en": "{0} splits per row",

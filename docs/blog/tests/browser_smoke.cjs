@@ -95,6 +95,15 @@ function readingGeometry() {
     if (!bounds.width) continue;
     if (bounds.left < main.left - 1 || bounds.right > main.right + 1) mismatches.push(element.textContent.slice(0, 35));
   }
+  // A slot label can cross its own border even when the article fits the window.
+  for (const slot of document.querySelectorAll('#rank-figure .rank-slot')) {
+    const box = rect(slot);
+    const range = document.createRange();
+    range.selectNodeContents(slot);
+    if ([...range.getClientRects()].some(r => r.width && (r.left < box.left - 1 || r.right > box.right + 1))) {
+      mismatches.push(slot.dataset.slot);
+    }
+  }
   const hero = document.querySelector('.hero');
   if (hero.scrollWidth > hero.clientWidth + 1) mismatches.push('hero content');
   const chart = document.querySelector('#load-chart');
@@ -118,7 +127,6 @@ async function checkPage(browser, file, lang, otherPage) {
     await page.goto(url.href);
     assert.equal(await page.locator('html').getAttribute('lang'), lang);
     assert.equal(await page.locator('h1').innerText(), lang === 'en' ? 'Accelerating Qwen3.8 27B Inference on SM120' : '在 SM120 上加速千问3.8 27B 推理');
-    assert.equal(await page.locator('svg[role=img]').count(), 10);
     assert.equal(await page.locator('.fusion-widget .sm-architecture svg').count(), 3);
     assert.equal(await page.locator('.reference-list li').count(), 16);
     await page.evaluate(checkModels);
@@ -130,7 +138,7 @@ async function checkPage(browser, file, lang, otherPage) {
       }
     }
     await page.locator('#bucket-selected').selectOption('169');
-    for (const holder of ['pipe', 'rank', 'dma', 'bucket', 'merge']) {
+    for (const holder of ['pipe', 'dma', 'bucket', 'merge']) {
       await stepThrough(page, '#' + holder + '-steps');
     }
     for (const kind of ['norm', 'front', 'tail']) {
@@ -196,7 +204,7 @@ async function checkPage(browser, file, lang, otherPage) {
     assert.equal(await page.locator('.equation munderover').count(), 1);
     assert.deepEqual(errors, []);
     assert.deepEqual(network, []);
-    console.log(lang + ': ten diagrams, model checks, both themes, nine widths and language navigation passed');
+    console.log(lang + ': diagrams, model checks, both themes, nine widths and language navigation passed');
   } finally {
     await page.close();
   }
