@@ -14,7 +14,7 @@
 | [decode.csv](../../benchmarks/decode.csv) | 完整模型 Decode Step | [配置与结果](../results.md) |
 | [http_fusion.csv](../../benchmarks/http_fusion.csv) | 三 Profile HTTP 吞吐 | [配置与结果](../results.md) |
 
-算子融合的区间统计沿用 `docs/results.md`：NormPack 约 33–39%，Front 约 52–55%，完整 XQA Tail 约 0.7–1.3%，完整 GPU Decode 调用 2.04–7.18%。
+算子融合的区间统计沿用 `docs/results.md`：NormPack 约 33–39%，Front 约 52–55%，完整 XQA Attention 路径 约 0.7–1.3%，完整 GPU Decode 调用 2.04–7.18%。
 
 Prefill 表按每个长度的最佳 CPP/VPP 配置组织。Decode 表使用共同输出窗口的 Step 统计；HTTP 表使用两轮正式 bank 的输出 Token 总数与总时长。完整配置在网页各章的实验折叠区。
 

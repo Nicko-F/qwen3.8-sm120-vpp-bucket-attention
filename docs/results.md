@@ -92,7 +92,7 @@ vary by cohort, so the benchmark records them alongside aggregate throughput.
 | --- | --- | ---: |
 | Residual/RMSNorm → NVFP4 pack | Direct producer | About 33–39% |
 | QK norm/RoPE/gate/KV append | Direct producer | About 52–55% |
-| Attention output/gate/static FP8 | Complete XQA tail | About 0.7–1.3% |
+| Attention output/gate/static FP8 | Complete XQA attention path | About 0.7–1.3% |
 | All three | Full GPU decode call, B1/8/16/32, 1K/2K contexts | 2.04–7.18% |
 
 The full-call comparison runs both arms on the same aligned bucket path,
